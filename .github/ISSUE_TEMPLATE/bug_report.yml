@@ -1,0 +1,67 @@
+name: Bug report
+description: Report reproducible behavior that is not working as expected.
+title: "[Bug]: "
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Remove secrets, private guild content, and member data before submitting.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: This report does not contain a bot token, credential, or private guild/member data.
+          required: true
+        - label: This is not a security vulnerability. I will follow SECURITY.md for vulnerabilities.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+      placeholder: When I run the command, the assistant does this, but I expected something else.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Version or commit
+      description: Provide a release tag or commit SHA when known.
+      placeholder: v0.1.0 or abc1234
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Deployed Cloudflare Worker
+        - Local Wrangler development server
+        - Automated tests
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste a small redacted excerpt. Do not upload credentials or private Discord content.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
