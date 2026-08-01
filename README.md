@@ -18,9 +18,10 @@ Live health endpoint:
 
 ## Functional MVP
 
-M1–M3 are implemented:
+The native weekly workflow is implemented end to end:
 
-- Per-server Discord setup, sanitized status, and actionable doctor commands.
+- Guided, resumable per-server Discord setup, sanitized status, and actionable
+  doctor commands. Safe defaults let an admin configure one setting at a time.
 - Time-zone-aware weekly event creation across daylight-saving changes.
 - Explicit draft, open, locked, planned, published, archived, and cancelled
   lifecycle state with audited, idempotent transitions.
@@ -30,9 +31,16 @@ M1–M3 are implemented:
 - Deterministic table sizing that prefers six seats and reduces to five or four
   when more GMs are viable.
 - Reviewable draft revisions with audited table-name, capacity, and GM overrides.
-- Explicit publication, Discord-enforced message nonces, and concurrency guards.
+- Paused, review, and autopilot modes. Autopilot creates/opens the week, sends
+  configured reminders, locks, plans, publishes, finalizes, and archives it;
+  review mode pauses for an organizer to approve publication.
+- Idempotent publication, Discord-enforced message nonces, and concurrency
+  guards.
 - Player table choice/change/leave, atomic capacity enforcement, table-specific
-  waitlists, and deterministic promotion.
+  waitlists, and deterministic promotion. Selection closes at game time and the
+  bot posts a final Discord manifest for the session.
+- Audited late admin corrections that regenerate the plan and carry forward
+  valid player table choices when the table and its capacity still allow them.
 - Bot-owned weekly GM role leases that preserve every manually assigned role.
 - Safe configured-role reminders, aggregate capacity warnings, atomic claims,
   one-occurrence cooldowns, conditional organizer escalation, capped
@@ -42,13 +50,15 @@ M1–M3 are implemented:
 - Versioned D1 migrations and comprehensive automated tests.
 
 Raid Helper can remain beside the assistant for the broad gaming-interest poll
-and its existing CSV/Google Sheets handoff. Guild Assistant never scrapes another
-bot or depends on private Raid Helper behavior. See the
+or unrelated events during the pilot. It is not a dependency: Guild Assistant
+never scrapes another bot or depends on private Raid Helper behavior. See the
 [interoperability decision](docs/decisions/0001-raid-helper-boundary.md).
 
-CSV export and direct Google Sheets automation remain M4, so M1–M3 are the
-functional weekly-operations MVP while Raid Helper supplies the existing export
-fallback.
+`/week export` provides an admin-only, private, formula-safe CSV snapshot for
+portability, backup, or ad hoc analysis. It is not a weekly operating step and
+the bot needs no Google account or credentials. D1 remains the source of truth
+and Discord remains the member-facing workflow; an optional spreadsheet is only
+an external copy. See the [export boundary](docs/decisions/0002-export-boundary.md).
 
 ## Discord commands
 
@@ -57,17 +67,20 @@ Admin commands require Manage Server and return private responses.
 | Command | Purpose |
 | --- | --- |
 | <code>/ping</code> | Verify the signed interaction endpoint. |
-| <code>/guild setup</code> | Configure text/announcement channel, GM/reminder/organizer roles, IANA time zone, schedule, table policy, and safe automation switches. |
+| <code>/guild setup</code> | Show the guided setup dashboard or update only the supplied channel, role, time-zone, schedule, or table-policy settings. |
+| <code>/guild automation</code> | Explicitly select paused, review, or autopilot mode and optional reminder/role automation. |
 | <code>/guild status</code> | Show sanitized effective configuration and current weekly state. |
 | <code>/guild doctor</code> | Check channels, permissions, role existence, and hierarchy. |
 | <code>/week open</code> | Open the next scheduled or explicitly dated signup. |
+| <code>/week status</code> | Show the current phase, counts, revision, delivery state, and capacity risk. |
 | <code>/week signup</code> | Record an audited late signup, cancellation, or admin correction. |
 | <code>/week lock</code> | Lock the signup snapshot. |
 | <code>/week plan</code> | Generate or regenerate a deterministic draft revision. |
 | <code>/week override</code> | Change one draft table's name, capacity, or active GM with an audit reason. |
 | <code>/week publish</code> | Explicitly publish the reviewed draft. |
-| <code>/week retry</code> | Recover publication, open, lock/plan, reminder, or role work safely. |
-| <code>/week skip</code> | Confirm an audited skip of one scheduled occurrence. |
+| <code>/week export</code> | Download a private, formula-safe CSV snapshot for portability or backup. |
+| <code>/week retry</code> | Recover publication, open, lock/plan, reminder, finalization, or role work safely. |
+| <code>/week skip</code> | Confirm an audited skip of one scheduled open, lock, reminder, publication, finalization, or archive occurrence. |
 | <code>/week cancel</code> | Cancel an unfinished/published week with an audit reason. |
 | <code>/week archive</code> | Close the week and reconcile assistant-owned roles. |
 | <code>/roles sync</code> | Preview or apply weekly GM role reconciliation. |
@@ -87,7 +100,7 @@ Grant only:
 - Embed Links
 - Read Message History
 - Manage Roles, only for weekly GM role automation
-- Attach Files later, when M4 exports are enabled
+- Attach Files in a channel only when admins will invoke <code>/week export</code>
 
 Do not grant Administrator. Put the bot's integration role above the normal
 weekly GM role. If reminders must notify a role, make that role mentionable or
@@ -149,10 +162,13 @@ Authenticate Wrangler, create a D1 database once, place its database ID in
     npm run commands:register
 
 Set the deployed Worker URL as the Discord application's Interactions Endpoint
-URL. In the test server, run <code>/guild setup</code>, then
-<code>/guild doctor</code>, and resolve every required failure before a real
-weekly cycle. First-time setup leaves scheduling and role sync paused unless
-their explicit options are enabled.
+URL. In the test server, run <code>/guild setup</code> with no options to see the
+guided dashboard, then save the event channel and any settings that differ from
+the safe defaults. Run <code>/guild doctor</code> and resolve every required
+failure before a real weekly cycle. Setup starts in paused mode. After a
+synthetic cycle, explicitly select review or autopilot with
+<code>/guild automation</code>; role sync and reminders remain independently
+optional.
 
 The checked-in Cron Trigger runs every 15 minutes. Per-guild local schedule and
 time zone live in D1; repeated Cloudflare deliveries use conditional writes,

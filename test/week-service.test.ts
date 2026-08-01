@@ -42,6 +42,7 @@ function guildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     tablePreferredSize: 6,
     tableMaxSize: 6,
     schedulingEnabled: true,
+    autoPublishEnabled: false,
     roleSyncEnabled: true,
     createdAt: NOW,
     updatedAt: NOW,
@@ -61,6 +62,7 @@ function weeklyEvent(
     endsAt: STARTS_AT + 4 * 60 * 60_000,
     signupOpensAt: STARTS_AT - 7 * 86_400_000,
     signupLocksAt: STARTS_AT - 24 * 3_600_000,
+    tableSelectionClosesAt: STARTS_AT,
     reminderAt: STARTS_AT - 48 * 3_600_000,
     status,
     source: "native",
@@ -69,6 +71,12 @@ function weeklyEvent(
     signupMessageId: "signup-message",
     tableChannelId: null,
     tableMessageId: null,
+    finalManifestChannelId: null,
+    finalManifestMessageId: null,
+    tableStateVersion: 0,
+    finalizedPlanId: null,
+    finalizedTableStateVersion: null,
+    tablesFinalizedAt: null,
     createdByUserId: "admin-1",
     createdAt: NOW,
     updatedAt: NOW,
@@ -198,12 +206,14 @@ class FakeDiscord {
     payload: DiscordMessagePayload;
   }> = [];
   failSendNumber: number | null = null;
+  afterSend: (() => void) | null = null;
 
   async sendChannelMessage(channelId: string, payload: DiscordMessagePayload) {
     this.sends.push({ channelId, payload });
     if (this.failSendNumber === this.sends.length) {
       throw new Error("synthetic Discord send failure");
     }
+    this.afterSend?.();
     return { id: "message-" + this.sends.length, channel_id: channelId };
   }
 
@@ -242,6 +252,20 @@ class FakeRepository {
   readonly leaveCalls: Array<{ planId: string; userId: string }> = [];
   readonly withdrawSignupCalls: Array<{ eventId: string; userId: string }> = [];
   readonly withdrawAssignmentCalls: Array<{ planId: string; userId: string }> = [];
+  readonly ensureAssignmentCalls: Array<{
+    assignmentId: string;
+    planId: string;
+    userId: string;
+    displayName: string;
+  }> = [];
+  readonly finalManifestWrites: Array<{
+    eventId: string;
+    channelId: string;
+    messageId: string;
+    planId: string;
+    tableStateVersion: number;
+    finalizedAt: number;
+  }> = [];
   readonly overrideCalls: Array<{
     planId: string;
     tableNumber: number;
@@ -267,6 +291,28 @@ class FakeRepository {
       : this.event;
   }
 
+  async getLatestWeeklyEvent() {
+    return this.event;
+  }
+
+  async getWeeklyExportSnapshot(guildId: string, eventId?: string) {
+    const event = this.event;
+    if (
+      !event ||
+      event.guildId !== guildId ||
+      (eventId !== undefined && event.eventId !== eventId)
+    ) {
+      return null;
+    }
+    const signups = await this.listAllSignups(event.eventId);
+    const plan = await this.getCurrentPlan(event.eventId);
+    return {
+      event,
+      signups,
+      planBundle: plan ? (this.bundles.get(plan.planId) ?? null) : null,
+    };
+  }
+
   async createWeeklyEvent(input: CreateWeeklyEventInput) {
     this.createdEvents.push(input);
     this.event = weeklyEvent(input.status ?? "draft", {
@@ -279,6 +325,8 @@ class FakeRepository {
       signupMessageId: null,
       tableChannelId: null,
       tableMessageId: null,
+      finalManifestChannelId: null,
+      finalManifestMessageId: null,
       createdByUserId: input.createdByUserId ?? null,
     });
     return this.event;
@@ -301,6 +349,12 @@ class FakeRepository {
           item.status === "active" &&
           (kind === undefined || item.signupKind === kind),
       )
+      .sort((left, right) => left.signedUpAt - right.signedUpAt || left.userId.localeCompare(right.userId));
+  }
+
+  async listAllSignups(eventId: string) {
+    return [...this.signups.values()]
+      .filter((item) => item.eventId === eventId)
       .sort((left, right) => left.signedUpAt - right.signedUpAt || left.userId.localeCompare(right.userId));
   }
 
@@ -451,6 +505,41 @@ class FakeRepository {
     );
   }
 
+  private advanceTableState(): void {
+    if (this.event) this.event.tableStateVersion += 1;
+  }
+
+  async ensureUnassignedAssignment(input: {
+    assignmentId: string;
+    planId: string;
+    userId: string;
+    displayName: string;
+  }) {
+    this.ensureAssignmentCalls.push(input);
+    const bundle = this.bundles.get(input.planId);
+    if (!bundle) throw new Error("invalid synthetic plan");
+    let current = bundle.assignments.find((item) => item.userId === input.userId);
+    if (!current) {
+      current = assignment(input.userId, "unassigned", {
+        assignmentId: input.assignmentId,
+        planId: input.planId,
+        displayName: input.displayName,
+      });
+      bundle.assignments.push(current);
+    } else if (current.status === "withdrawn") {
+      Object.assign(current, {
+        displayName: input.displayName,
+        status: "unassigned",
+        tableId: null,
+        desiredTableId: null,
+        waitlistPosition: null,
+        assignedAt: null,
+      });
+    }
+    this.advanceTableState();
+    return current;
+  }
+
   async updateDraftTable(input: {
     planId: string;
     tableNumber: number;
@@ -486,6 +575,35 @@ class FakeRepository {
       }
     }
     return false;
+  }
+
+  async setFinalManifest(
+    eventId: string,
+    channelId: string,
+    messageId: string,
+    planId: string,
+    tableStateVersion: number,
+    finalizedAt: number,
+  ) {
+    this.finalManifestWrites.push({
+      eventId,
+      channelId,
+      messageId,
+      planId,
+      tableStateVersion,
+      finalizedAt,
+    });
+    if (
+      !this.event ||
+      this.event.eventId !== eventId ||
+      this.event.tableStateVersion !== tableStateVersion
+    ) return false;
+    this.event.finalManifestChannelId = channelId;
+    this.event.finalManifestMessageId = messageId;
+    this.event.finalizedPlanId = planId;
+    this.event.finalizedTableStateVersion = tableStateVersion;
+    this.event.tablesFinalizedAt = finalizedAt;
+    return true;
   }
 
   async beginOperation(input: { operationKey: string }): Promise<BeginOperationResult> {
@@ -536,7 +654,10 @@ class FakeRepository {
     if (!bundle) return false;
     bundle.plan.status = "published";
     bundle.plan.publishedAt = NOW;
-    if (this.event?.eventId === input.eventId) this.event.status = "published";
+    if (this.event?.eventId === input.eventId) {
+      this.event.status = "published";
+      this.advanceTableState();
+    }
     return true;
   }
 
@@ -601,6 +722,7 @@ class FakeRepository {
       outcome = "waitlisted";
     }
     const promoted = oldTableId && oldTableId !== tableId ? this.promote(planId, oldTableId) : null;
+    this.advanceTableState();
     return {
       outcome,
       position: selected.waitlistPosition,
@@ -624,6 +746,7 @@ class FakeRepository {
       waitlistPosition: null,
       assignedAt: null,
     });
+    this.advanceTableState();
     return {
       left: true,
       assignment: selected,
@@ -649,6 +772,7 @@ class FakeRepository {
       waitlistPosition: null,
       assignedAt: null,
     });
+    this.advanceTableState();
     return {
       left: true,
       assignment: selected,
@@ -684,6 +808,7 @@ describe("WeekService", () => {
     await instance.openWeek({ guildId: "synthetic-guild" });
 
     expect(repository.createdEvents).toHaveLength(1);
+    expect(repository.createdEvents[0]?.tableSelectionClosesAt).toBe(STARTS_AT);
     expect(discord.sends).toHaveLength(1);
     expect(discord.edits).toHaveLength(1);
     expect(repository.eventMessageWrites[0]).toMatchObject({
@@ -788,6 +913,7 @@ describe("WeekService", () => {
         source: "admin",
       });
       expect(corrected.warning).toBeUndefined();
+      expect(corrected.requiresReplan).toBe(false);
       expect(repository.audits.at(-1)).toMatchObject({
         guildId: "synthetic-guild",
         eventId: "event-1",
@@ -806,7 +932,7 @@ describe("WeekService", () => {
   );
 
   it.each(["planned", "published"] as const)(
-    "warns that a %s plan predates an admin correction",
+    "warns that a %s plan predates a GM-affecting admin correction",
     async (status) => {
       const repository = new FakeRepository();
       repository.event = weeklyEvent(status);
@@ -815,20 +941,21 @@ describe("WeekService", () => {
       const corrected = await instance.correctSignup({
         guildId: "synthetic-guild",
         actorUserId: "admin-1",
-        userId: "late-player",
-        displayName: "Late Player",
-        action: "player",
+        userId: "late-gm",
+        displayName: "Late GM",
+        action: "gm",
       });
 
       expect(corrected.warning).toBe(
         "The plan predates this correction. Run /week plan, review the new revision, and publish it.",
       );
+      expect(corrected.requiresReplan).toBe(true);
     },
   );
 
-  it("withdraws signup and assignment, promotes, and refreshes published tables", async () => {
+  it("withdraws after cutoff, promotes, and keeps refreshed table cards closed", async () => {
     const repository = new FakeRepository();
-    repository.event = weeklyEvent("published");
+    repository.event = weeklyEvent("published", { tableSelectionClosesAt: NOW });
     repository.signups.set("departing", signup("departing", "player"));
     const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
     for (const [index, table] of bundle.tables.entries()) {
@@ -876,8 +1003,16 @@ describe("WeekService", () => {
       "table-message-1",
       "table-message-2",
     ]);
+    expect(
+      discord.edits.slice(0, 2).every((edit) =>
+        (edit.payload.components?.[0]?.components ?? []).every(
+          (component) => component.disabled === true,
+        ),
+      ),
+    ).toBe(true);
     expect(discord.edits[2]?.messageId).toBe("signup-message");
-    expect(corrected.warning).toContain("Run /week plan");
+    expect(corrected.warning).toBeUndefined();
+    expect(corrected.requiresReplan).toBe(false);
     expect(repository.audits.at(-1)).toMatchObject({
       action: "signup.admin-correction",
       entityId: "departing",
@@ -1218,6 +1353,25 @@ describe("WeekService", () => {
     expect(discord.edits).toHaveLength(edits);
   });
 
+  it("publishes a corrected plan after cutoff with every table control closed", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("planned", { tableSelectionClosesAt: NOW });
+    repository.bundles.set("plan-1", planBundle());
+    const discord = new FakeDiscord();
+    const instance = service(repository, discord);
+
+    await instance.publishPlan("synthetic-guild", "admin-1");
+
+    expect(discord.sends).toHaveLength(2);
+    expect(
+      discord.sends.every((send) =>
+        (send.payload.components?.[0]?.components ?? []).every(
+          (component) => component.disabled === true,
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it("reclaims a failed publication and resumes its persisted messages", async () => {
     const repository = new FakeRepository();
     repository.event = weeklyEvent("planned");
@@ -1321,7 +1475,8 @@ describe("WeekService", () => {
         action: "join",
       }),
     ).resolves.toMatchObject({
-      message: "This table is full; you are waitlisted at position 2.",
+      message:
+        "This table is full; you are waitlisted at position 2. Open tables with seats: Table 2.",
     });
     const left = await instance.selectTable({
       guildId: "synthetic-guild",
@@ -1400,7 +1555,7 @@ describe("WeekService", () => {
 
   it("archives signup and table messages with all controls closed", async () => {
     const repository = new FakeRepository();
-    repository.event = weeklyEvent("published");
+    repository.event = weeklyEvent("published", { tableSelectionClosesAt: NOW });
     const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
     bundle.tables[0]!.channelId = "tables-channel";
     bundle.tables[0]!.messageId = "table-message-1";
@@ -1413,9 +1568,295 @@ describe("WeekService", () => {
 
     expect(archived.status).toBe("archived");
     expect(discord.edits).toHaveLength(2);
-    expect(discord.edits[0]?.payload.components).toEqual([]);
-    const tableButtons = discord.edits[1]?.payload.components?.[0]?.components ?? [];
+    const signupEdit = discord.edits.find((item) => item.messageId === "signup-message");
+    expect(signupEdit?.payload.components).toEqual([]);
+    const tableEdit = discord.edits.find((item) => item.messageId === "table-message-1");
+    const tableButtons = tableEdit?.payload.components?.[0]?.components ?? [];
     expect(tableButtons.every((button) => button.disabled === true)).toBe(true);
+    expect(repository.finalManifestWrites).toHaveLength(1);
+    expect(discord.sends).toHaveLength(1);
+  });
+
+  it("carries compatible published choices into a regenerated draft by GM", async () => {
+    const repository = new FakeRepository();
+    repository.config = guildConfig({
+      tableMinSize: 1,
+      tablePreferredSize: 2,
+      tableMaxSize: 2,
+    });
+    repository.event = weeklyEvent("published");
+    for (const gm of ["gm-1", "gm-2"]) repository.signups.set(gm, signup(gm, "gm"));
+    for (const player of ["player-a", "player-b", "player-c", "player-d", "player-e"]) {
+      repository.signups.set(player, signup(player, "player"));
+    }
+    const oldPlan = draftPlan({
+      planId: "plan-old",
+      status: "published",
+      publishedAt: NOW,
+      playerCount: 5,
+      selectedGmCount: 3,
+      gmSignupCount: 3,
+    });
+    const oldBundle = planBundle(oldPlan);
+    oldBundle.tables.push({
+      tableId: "table-old-incompatible",
+      planId: "plan-old",
+      tableNumber: 3,
+      title: "Old GM table",
+      capacity: 2,
+      gmUserId: "gm-no-longer-selected",
+      gmDisplayName: "Old GM",
+      channelId: null,
+      messageId: null,
+      createdAt: NOW,
+    });
+    oldBundle.assignments.push(
+      assignment("player-a", "assigned", {
+        planId: "plan-old",
+        tableId: "table-1",
+        desiredTableId: "table-1",
+        assignedAt: NOW - 4,
+      }),
+      assignment("player-b", "assigned", {
+        planId: "plan-old",
+        tableId: "table-1",
+        desiredTableId: "table-1",
+        assignedAt: NOW - 3,
+      }),
+      assignment("player-c", "waitlisted", {
+        planId: "plan-old",
+        desiredTableId: "table-1",
+        waitlistPosition: 1,
+      }),
+      assignment("player-d", "assigned", {
+        planId: "plan-old",
+        tableId: "table-2",
+        desiredTableId: "table-2",
+        assignedAt: NOW - 2,
+      }),
+      assignment("player-e", "assigned", {
+        planId: "plan-old",
+        tableId: "table-old-incompatible",
+        desiredTableId: "table-old-incompatible",
+        assignedAt: NOW - 1,
+      }),
+    );
+    repository.bundles.set("plan-old", oldBundle);
+    const instance = service(repository, new FakeDiscord(), [
+      "plan-new",
+      "table-new-1",
+      "table-new-2",
+      "assignment-a",
+      "assignment-b",
+      "assignment-c",
+      "assignment-d",
+      "assignment-e",
+    ]);
+
+    const generated = await instance.generatePlan("synthetic-guild", "admin-1");
+    const tableByGm = new Map(
+      generated.bundle.tables.map((table) => [table.gmUserId, table.tableId]),
+    );
+    const carried = new Map(
+      generated.bundle.assignments.map((item) => [item.userId, item]),
+    );
+
+    expect(carried.get("player-a")).toMatchObject({
+      status: "assigned",
+      tableId: tableByGm.get("gm-1"),
+    });
+    expect(carried.get("player-b")).toMatchObject({
+      status: "assigned",
+      tableId: tableByGm.get("gm-1"),
+    });
+    expect(carried.get("player-c")).toMatchObject({
+      status: "waitlisted",
+      desiredTableId: tableByGm.get("gm-1"),
+      waitlistPosition: 1,
+    });
+    expect(carried.get("player-d")).toMatchObject({
+      status: "assigned",
+      tableId: tableByGm.get("gm-2"),
+    });
+    expect(carried.get("player-e")).toMatchObject({
+      status: "unassigned",
+      tableId: null,
+    });
+  });
+
+  it("adds or revives a late published-plan player so they can choose immediately", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("published");
+    repository.signups.set("late-player", {
+      ...signup("late-player", "player"),
+      status: "withdrawn",
+      withdrawnAt: NOW - 1,
+    });
+    const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
+    bundle.assignments.push(assignment("late-player", "withdrawn"));
+    repository.bundles.set("plan-1", bundle);
+    const instance = service(repository, new FakeDiscord(), ["late-assignment"]);
+
+    const corrected = await instance.correctSignup({
+      guildId: "synthetic-guild",
+      actorUserId: "admin-1",
+      userId: "late-player",
+      displayName: "Late Player",
+      action: "player",
+    });
+    const selected = await instance.selectTable({
+      guildId: "synthetic-guild",
+      planId: "plan-1",
+      tableId: "table-1",
+      userId: "late-player",
+      action: "join",
+    });
+
+    expect(corrected).toMatchObject({ requiresReplan: false });
+    expect(corrected.warning).toBeUndefined();
+    expect(repository.ensureAssignmentCalls).toHaveLength(1);
+    expect(selected.message).toBe("You joined this table.");
+  });
+
+  it("releases and promotes a seated player who is corrected to GM", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("published");
+    repository.signups.set("player-a", signup("player-a", "player"));
+    const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
+    bundle.assignments.push(
+      assignment("player-a", "assigned", {
+        tableId: "table-1",
+        desiredTableId: "table-1",
+      }),
+      assignment("player-b", "waitlisted", {
+        desiredTableId: "table-1",
+        waitlistPosition: 1,
+      }),
+    );
+    repository.bundles.set("plan-1", bundle);
+    const corrected = await service(repository, new FakeDiscord()).correctSignup({
+      guildId: "synthetic-guild",
+      actorUserId: "admin-1",
+      userId: "player-a",
+      displayName: "Player A",
+      action: "gm",
+    });
+
+    expect(corrected.requiresReplan).toBe(true);
+    expect(bundle.assignments.find((item) => item.userId === "player-a")?.status).toBe(
+      "withdrawn",
+    );
+    expect(bundle.assignments.find((item) => item.userId === "player-b")).toMatchObject({
+      status: "assigned",
+      tableId: "table-1",
+    });
+  });
+
+  it("rejects table choices at the exact selection-close boundary", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("published", { tableSelectionClosesAt: NOW });
+    const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
+    bundle.assignments.push(assignment("player-a"));
+    repository.bundles.set("plan-1", bundle);
+
+    await expect(
+      service(repository, new FakeDiscord()).selectTable({
+        guildId: "synthetic-guild",
+        planId: "plan-1",
+        tableId: "table-1",
+        userId: "player-a",
+        action: "join",
+      }),
+    ).rejects.toThrow("Table selection closed");
+    expect(repository.joinCalls).toHaveLength(0);
+  });
+
+  it("finalizes one manifest idempotently and validates its tenant", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("published", { tableSelectionClosesAt: NOW });
+    const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
+    bundle.tables[0]!.channelId = "tables-channel";
+    bundle.tables[0]!.messageId = "table-message-1";
+    bundle.tables.splice(1);
+    bundle.assignments.push(
+      assignment("player-a", "assigned", {
+        tableId: "table-1",
+        desiredTableId: "table-1",
+      }),
+    );
+    repository.bundles.set("plan-1", bundle);
+    const discord = new FakeDiscord();
+    const instance = service(repository, discord);
+
+    await expect(instance.finalizeTables("other-guild", "event-1")).rejects.toThrow(
+      "belongs to a different server",
+    );
+    const first = await instance.finalizeTables("synthetic-guild", "event-1");
+    const replay = await instance.finalizeTables("synthetic-guild", "event-1");
+
+    expect(first.messageId).toBe("message-1");
+    expect(replay.messageId).toBe("message-1");
+    expect(discord.sends).toHaveLength(1);
+    expect(repository.finalManifestWrites).toHaveLength(2);
+    expect(repository.audits.filter((item) => item.action === "tables.finalized")).toHaveLength(1);
+    expect(discord.edits.some((item) => item.messageId === "message-1")).toBe(true);
+  });
+
+  it("rejects finalization before selection closes", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("published");
+    const instance = service(repository, new FakeDiscord());
+
+    await expect(
+      instance.finalizeTables("synthetic-guild", "event-1"),
+    ).rejects.toThrow("cannot be created until table selection closes");
+    expect(repository.finalManifestWrites).toHaveLength(0);
+  });
+
+  it("does not mark a manifest current when the roster changes during Discord delivery", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("published", {
+      tableSelectionClosesAt: NOW,
+      tableStateVersion: 3,
+    });
+    const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
+    bundle.tables.splice(1);
+    repository.bundles.set("plan-1", bundle);
+    const discord = new FakeDiscord();
+    discord.afterSend = () => {
+      repository.event!.tableStateVersion += 1;
+    };
+    const instance = service(repository, discord);
+
+    await expect(
+      instance.finalizeTables("synthetic-guild", "event-1"),
+    ).rejects.toThrow("roster changed while the final manifest was being written");
+    expect(repository.event.finalizedPlanId).toBeNull();
+    expect(repository.event.finalizedTableStateVersion).toBeNull();
+    expect(repository.finalManifestWrites).toHaveLength(1);
+  });
+
+  it("exports a tenant-scoped snapshot and gives uniform missing-event errors", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("archived");
+    repository.signups.set("gm-1", signup("gm-1", "gm"));
+    repository.signups.set("player-1", signup("player-1", "player"));
+    const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
+    repository.bundles.set("plan-1", bundle);
+    const instance = service(repository, new FakeDiscord());
+
+    const snapshot = await instance.exportSnapshot("synthetic-guild");
+    expect(snapshot.event.status).toBe("archived");
+    expect(snapshot.signups).toHaveLength(2);
+    expect(snapshot.planBundle?.plan.planId).toBe("plan-1");
+    const crossGuild = instance.exportSnapshot("other-guild", "event-1");
+    const missing = instance.exportSnapshot("synthetic-guild", "missing-event");
+    await expect(crossGuild).rejects.toThrow(
+      "There is no weekly event to export for this server.",
+    );
+    await expect(missing).rejects.toThrow(
+      "There is no weekly event to export for this server.",
+    );
   });
 
   it("renders a complete status from synthetic values without null artifacts", async () => {
@@ -1432,6 +1873,10 @@ describe("WeekService", () => {
     expect(status).toContain("Synthetic Saturday Games");
     expect(status).toContain("1 GMs / 1 players");
     expect(status).toContain("draft revision 1");
+    expect(status).toContain("Saturday at 18:30");
+    expect(status).toContain("opens 7 days before; locks 24 hours before");
+    expect(status).toContain("auto-publish off");
+    expect(status).toContain("**Event ID:** event-1");
     expect(status).not.toContain("undefined");
     expect(status).not.toContain("null");
   });

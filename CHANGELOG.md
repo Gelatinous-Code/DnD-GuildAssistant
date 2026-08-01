@@ -25,3 +25,10 @@ The project follows [Semantic Versioning](https://semver.org/). Dates use the
   markers, and free-tier-safe bulk D1 planning writes.
 - Versioned D1 migration, operations/retention documentation, and Cloudflare
   deployment configuration.
+- Guided, update-only setup with explicit paused, review, and autopilot modes.
+- Automatic publication, post-publication correction recovery, table-choice
+  carry-forward, selection deadlines, final manifests, and archive sequencing.
+- Private admin-only weekly roster CSV downloads with deterministic ordering,
+  bounded attachments, and spreadsheet-formula neutralization.
+- GitHub Actions command registration using the repository's Discord secret
+  after command definitions change on the default branch.

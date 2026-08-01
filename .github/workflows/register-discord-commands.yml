@@ -1,0 +1,36 @@
+name: Register Discord commands
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/commands.mjs
+      - scripts/register-commands.mjs
+      - .github/workflows/register-discord-commands.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: register-discord-commands
+  cancel-in-progress: true
+
+jobs:
+  register:
+    name: Register test-guild commands
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: discord-command-registration
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Register commands
+        run: node scripts/register-commands.mjs
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_APPLICATION_ID: ${{ vars.DISCORD_APPLICATION_ID || '1533171671886725293' }}
+          DISCORD_TEST_GUILD_ID: ${{ vars.DISCORD_TEST_GUILD_ID || '1533181439376494642' }}

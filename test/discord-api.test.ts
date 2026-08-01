@@ -6,6 +6,7 @@ import {
   DiscordRestClient,
   discordNonce,
   discordTimestamp,
+  renderFinalManifest,
   renderPlanPreview,
   renderPublishedTable,
   renderPublishedTables,
@@ -192,6 +193,132 @@ describe("DiscordRestClient", () => {
     expect(JSON.parse(String(init.body)).allowed_mentions).toEqual(
       safeAllowedMentions(),
     );
+  });
+
+  it("edits deferred interaction responses with a bounded multipart attachment", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ id: "900", channel_id: "200", content: "Export ready" }),
+    );
+
+    await client.editOriginalInteractionResponseWithFile(
+      "100",
+      "sensitive-token",
+      {
+        content: "@everyone Export ready",
+        allowed_mentions: {
+          parse: ["everyone"],
+          roles: ["300"],
+          users: ["400"],
+          replied_user: true,
+        } as never,
+      },
+      {
+        filename: "weekly-tables.csv",
+        content: "player,table\nChappy,1\n",
+        contentType: "text/csv;charset=utf-8",
+      },
+    );
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      API_BASE_URL + "/webhooks/100/sensitive-token/messages/@original",
+    );
+    expect(init.method).toBe("PATCH");
+    expect(new Headers(init.headers).get("content-type")).toBeNull();
+    expect(init.body).toBeInstanceOf(FormData);
+    const form = init.body as FormData;
+    expect(JSON.parse(String(form.get("payload_json")))).toEqual({
+      content: "@everyone Export ready",
+      allowed_mentions: safeAllowedMentions(["300"]),
+      attachments: [{ id: 0, filename: "weekly-tables.csv" }],
+    });
+    const uploaded = form.get("files[0]") as File;
+    expect(uploaded.name).toBe("weekly-tables.csv");
+    expect(uploaded.type).toBe("text/csv;charset=utf-8");
+    expect(await uploaded.text()).toBe("player,table\nChappy,1\n");
+  });
+
+  it("rejects unsafe or oversized attachments before fetching", () => {
+    expect(() =>
+      client.editOriginalInteractionResponseWithFile(
+        "100",
+        "sensitive-token",
+        { content: "Export ready" },
+        { filename: "../weekly.csv", content: "safe" },
+      ),
+    ).toThrow("path separators");
+    expect(() =>
+      client.editOriginalInteractionResponseWithFile(
+        "100",
+        "sensitive-token",
+        { content: "Export ready" },
+        { filename: "x".repeat(256), content: "safe" },
+      ),
+    ).toThrow("255 characters");
+    expect(() =>
+      client.editOriginalInteractionResponseWithFile(
+        "100",
+        "sensitive-token",
+        { content: "Export ready" },
+        { filename: "weekly.csv", content: "x".repeat(512 * 1024 + 1) },
+      ),
+    ).toThrow("524288 bytes");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("creates fresh multipart data for a Discord rate-limit retry", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock
+        .mockResolvedValueOnce(
+          jsonResponse({ message: "Rate limited", retry_after: 0 }, 429),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ id: "900", channel_id: "200", content: "Export ready" }),
+        );
+
+      const pending = client.editOriginalInteractionResponseWithFile(
+        "100",
+        "sensitive-token",
+        { content: "Export ready" },
+        { filename: "weekly.csv", content: new Uint8Array([1, 2, 3]) },
+      );
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const firstBody = (fetchMock.mock.calls[0]?.[1] as RequestInit).body as FormData;
+      const secondBody = (fetchMock.mock.calls[1]?.[1] as RequestInit).body as FormData;
+      expect(firstBody).toBeInstanceOf(FormData);
+      expect(secondBody).toBeInstanceOf(FormData);
+      expect(secondBody).not.toBe(firstBody);
+      expect(await (firstBody.get("files[0]") as File).arrayBuffer()).toEqual(
+        await (secondBody.get("files[0]") as File).arrayBuffer(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("redacts interaction tokens from multipart response errors", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ message: "bad sensitive-token", code: 50_027 }, 401),
+    );
+
+    const error = await client
+      .editOriginalInteractionResponseWithFile(
+        "100",
+        "sensitive-token",
+        { content: "Export ready" },
+        { filename: "weekly.csv", content: "player,table" },
+      )
+      .catch((caught: unknown) => caught);
+
+    expect(String(error)).not.toContain("sensitive-token");
+    expect(String(error)).toContain("[interaction-token]");
+    expect((error as DiscordApiError).body).toMatchObject({
+      message: "bad [REDACTED]",
+    });
   });
 
   it("redacts interaction tokens from deferred-response errors", async () => {
@@ -400,6 +527,112 @@ describe("Discord message rendering", () => {
       expect.objectContaining({ name: "Table 1 — Brett" }),
       { name: "Waitlist (1)", value: "• E" },
     ]);
+  });
+
+  it("renders a safe, closed final manifest with waitlists and unassigned players", () => {
+    const manifest = renderFinalManifest({
+      planId: "plan-1",
+      generation: 3,
+      eventTitle: "**Saturday Games** @everyone",
+      startsAt,
+      tables: [
+        {
+          id: "table-1",
+          label: "*Table One*",
+          gmName: "_Brett_",
+          capacity: 6,
+          players: ["Chappy", "@everyone"],
+          waitlist: ["Wait*One"],
+        },
+      ],
+      unassigned: ["No_Table"],
+    });
+
+    expect(manifest.allowed_mentions).toEqual(safeAllowedMentions());
+    expect(manifest.components).toEqual([]);
+    expect(manifest.embeds).toHaveLength(1);
+    expect(manifest.embeds?.[0].title).toBe(
+      "📜 Final manifest — \\*\\*Saturday Games\\*\\* @everyone",
+    );
+    expect(manifest.embeds?.[0].description).toContain("**Plan revision:** 3");
+    expect(manifest.embeds?.[0].description).toContain("table selection is closed");
+    expect(manifest.embeds?.[0].fields?.[0]).toMatchObject({
+      name: "\\*Table One\\* — \\_Brett\\_",
+    });
+    expect(manifest.embeds?.[0].fields?.[0]?.value).toContain("**Seats:** 2/6");
+    expect(manifest.embeds?.[0].fields?.[0]?.value).toContain("**Waitlist (1)**");
+    expect(manifest.embeds?.[0].fields?.[0]?.value).toContain("Wait\\*One");
+    expect(manifest.embeds?.[0].fields?.[1]).toMatchObject({
+      name: "Unassigned / overflow",
+      value: expect.stringContaining("No\\_Table"),
+    });
+  });
+
+  it("limits final manifests to 23 table fields plus one overflow field", () => {
+    const manifest = renderFinalManifest({
+      planId: "plan-25",
+      generation: 1,
+      eventTitle: "Large Guild Night",
+      startsAt,
+      tables: Array.from({ length: 25 }, (_, index) => ({
+        id: `table-${index + 1}`,
+        label: `Table ${index + 1}`,
+        gmName: `GM ${index + 1}`,
+        capacity: 6,
+        players: [`Player ${index + 1}`],
+      })),
+      unassigned: ["Waiting Player"],
+    });
+
+    const fields = manifest.embeds?.[0].fields ?? [];
+    expect(fields).toHaveLength(24);
+    expect(fields.slice(0, 23).every((field) => field.name.startsWith("Table "))).toBe(true);
+    expect(fields[23]).toMatchObject({
+      name: "Unassigned / overflow",
+      value: expect.stringContaining("**Additional tables:** 2"),
+    });
+    expect(fields[23]?.value).toContain("Waiting Player");
+    expect(fields.every((field) => field.value.length <= 1024)).toBe(true);
+  });
+
+  it("keeps adversarial final manifests below Discord's aggregate embed budget", () => {
+    const manifest = renderFinalManifest({
+      planId: "plan-very-large",
+      generation: 999,
+      eventTitle: "X".repeat(1_000),
+      startsAt,
+      tables: Array.from({ length: 40 }, (_, tableIndex) => ({
+        id: `table-${tableIndex}`,
+        label: "Table " + "L".repeat(400),
+        gmName: "G".repeat(400),
+        capacity: 20,
+        players: Array.from(
+          { length: 20 },
+          (_, playerIndex) => `Player ${tableIndex}-${playerIndex} ${"P".repeat(250)}`,
+        ),
+        waitlist: Array.from(
+          { length: 20 },
+          (_, playerIndex) => `Wait ${tableIndex}-${playerIndex} ${"W".repeat(250)}`,
+        ),
+      })),
+      unassigned: Array.from(
+        { length: 100 },
+        (_, playerIndex) => `Unassigned ${playerIndex} ${"U".repeat(250)}`,
+      ),
+    });
+
+    const embed = manifest.embeds?.[0];
+    expect(embed).toBeDefined();
+    const aggregateCharacters =
+      (embed?.title?.length ?? 0) +
+      (embed?.description?.length ?? 0) +
+      (embed?.footer?.text.length ?? 0) +
+      (embed?.fields ?? []).reduce(
+        (total, field) => total + field.name.length + field.value.length,
+        0,
+      );
+    expect(aggregateCharacters).toBeLessThanOrEqual(5_800);
+    expect(embed?.fields?.length ?? 0).toBeLessThanOrEqual(25);
   });
 
   it("renders published table controls and exposes a waitlist path when full", () => {

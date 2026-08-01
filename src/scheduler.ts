@@ -3,6 +3,7 @@ import { DEFAULT_OPERATION_LEASE_MS } from "./storage/repository";
 import type {
   BeginOperationResult,
   GuildConfig,
+  Plan,
   ReminderDelivery,
   WeeklyEvent,
   CreateWeeklyEventInput,
@@ -12,6 +13,8 @@ export interface SchedulerRepository {
   listSchedulingGuilds(): Promise<GuildConfig[]>;
   findWeeklyEventByStart(guildId: string, startsAt: number): Promise<WeeklyEvent | null>;
   createWeeklyEvent(input: CreateWeeklyEventInput): Promise<WeeklyEvent>;
+  getWeeklyEvent(eventId: string): Promise<WeeklyEvent | null>;
+  getCurrentPlan(eventId: string): Promise<Plan | null>;
   listEventsForScheduler(through: number): Promise<WeeklyEvent[]>;
   listDueReminders(now: number, limit?: number): Promise<ReminderDelivery[]>;
   beginOperation(input: {
@@ -33,13 +36,24 @@ export interface SchedulerRepository {
 export interface SchedulerCallbacks {
   openEvent(event: WeeklyEvent): Promise<void>;
   lockAndPlanEvent(event: WeeklyEvent): Promise<void>;
+  publishEvent(event: WeeklyEvent): Promise<void>;
+  syncRoles(event: WeeklyEvent): Promise<void>;
+  finalizeEvent(event: WeeklyEvent): Promise<void>;
   archiveEvent(event: WeeklyEvent): Promise<void>;
   enqueueEventReminders(event: WeeklyEvent): Promise<void>;
   deliverReminder(delivery: ReminderDelivery): Promise<void>;
 }
 
 export interface ScheduledActionResult {
-  action: "create" | "open" | "lock-plan" | "archive" | "reminder";
+  action:
+    | "create"
+    | "open"
+    | "lock-plan"
+    | "publish"
+    | "roles"
+    | "finalize"
+    | "archive"
+    | "reminder";
   entityId: string;
   status: "succeeded" | "skipped" | "failed";
   operationKey?: string;
@@ -87,6 +101,7 @@ function eventInput(config: GuildConfig, now: number): CreateWeeklyEventInput {
     endsAt: startsAt + config.eventDurationMinutes * 60_000,
     signupOpensAt: startsAt - config.signupOpenLeadDays * 86_400_000,
     signupLocksAt: startsAt - config.signupLockLeadHours * 3_600_000,
+    tableSelectionClosesAt: startsAt,
     reminderAt:
       startsAt -
       config.signupLockLeadHours * 3_600_000 -
@@ -112,7 +127,7 @@ async function captureUnpersisted(
 }
 
 export function schedulerOperationKey(
-  action: "create" | "open" | "lock-plan" | "archive",
+  action: "create" | "open" | "lock-plan" | "publish" | "roles" | "finalize" | "archive",
   entityId: string,
 ): string {
   return `scheduler:${action}:${entityId}`;
@@ -124,16 +139,18 @@ interface PersistedWorkResult {
   result?: unknown;
 }
 
+type PersistedCaptureResult = "completed" | "busy" | "failed";
+
 async function capturePersisted(
   repository: SchedulerRepository,
   actions: ScheduledActionResult[],
-  action: "create" | "open" | "lock-plan" | "archive",
+  action: "create" | "open" | "lock-plan" | "publish" | "roles" | "finalize" | "archive",
   entityId: string,
   guildId: string,
   eventId: string | undefined,
   now: number,
   work: () => Promise<PersistedWorkResult | void>,
-): Promise<void> {
+): Promise<PersistedCaptureResult> {
   const operationKey = schedulerOperationKey(action, entityId);
   try {
     const claim = await repository.beginOperation({
@@ -161,7 +178,7 @@ async function capturePersisted(
           ? "The persisted scheduler operation already succeeded."
           : "Another scheduler invocation owns this operation.";
       actions.push({ action, entityId, operationKey, status: "skipped", detail });
-      return;
+      return claim.operation.status === "succeeded" ? "completed" : "busy";
     }
 
     const outcome = (await work()) ?? {};
@@ -185,10 +202,33 @@ async function capturePersisted(
       status: outcome.status ?? "succeeded",
       detail: outcome.detail,
     });
+    return "completed";
   } catch (error) {
-    const detail = (error instanceof Error ? error.message : String(error)).slice(0, 500);
-    await repository.finishOperation(operationKey, { status: "failed", error: detail });
+    const workDetail = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+    let detail = workDetail;
+    try {
+      const recorded = await repository.finishOperation(operationKey, {
+        status: "failed",
+        error: workDetail,
+      });
+      if (!recorded) {
+        detail = (
+          workDetail + " The scheduler failure status could not be persisted."
+        ).slice(0, 500);
+      }
+    } catch (persistenceError) {
+      const persistenceDetail =
+        persistenceError instanceof Error
+          ? persistenceError.message
+          : String(persistenceError);
+      detail = (
+        workDetail +
+        " Recording the scheduler failure also failed: " +
+        persistenceDetail
+      ).slice(0, 500);
+    }
     actions.push({ action, entityId, operationKey, status: "failed", detail });
+    return "failed";
   }
 }
 
@@ -204,6 +244,11 @@ export async function runScheduledTick(
 ): Promise<SchedulerReport> {
   const actions: ScheduledActionResult[] = [];
   const configs = await repository.listSchedulingGuilds();
+  const configByGuild = new Map(
+    configs
+      .filter((config) => config.schedulingEnabled)
+      .map((config) => [config.guildId, config] as const),
+  );
 
   for (const config of configs) {
     if (!config.schedulingEnabled || !config.eventChannelId) continue;
@@ -240,6 +285,9 @@ export async function runScheduledTick(
 
   const dueEvents = await repository.listEventsForScheduler(now);
   for (const event of dueEvents) {
+    const config = configByGuild.get(event.guildId);
+    if (!config) continue;
+
     if (event.status === "draft" && event.signupOpensAt <= now) {
       await capturePersisted(
         repository,
@@ -305,10 +353,85 @@ export async function runScheduledTick(
       );
       continue;
     }
+
+    if (event.status === "planned" && config.autoPublishEnabled) {
+      await capturePersisted(
+        repository,
+        actions,
+        "publish",
+        event.eventId,
+        event.guildId,
+        event.eventId,
+        now,
+        async () => {
+          await callbacks.publishEvent(event);
+        },
+      );
+      continue;
+    }
+
+    if (event.status === "published") {
+      const currentPlan = await repository.getCurrentPlan(event.eventId);
+      const publishedPlan = currentPlan?.status === "published" ? currentPlan : null;
+
+      if (config.roleSyncEnabled && publishedPlan) {
+        const rolesEntityId = `${event.eventId}:${publishedPlan.planId}`;
+        await capturePersisted(
+          repository,
+          actions,
+          "roles",
+          rolesEntityId,
+          event.guildId,
+          event.eventId,
+          now,
+          async () => {
+            await callbacks.syncRoles(event);
+          },
+        );
+      }
+
+      let finalization: PersistedCaptureResult = publishedPlan ? "completed" : "failed";
+      const finalizationDue =
+        publishedPlan !== null &&
+        event.tableSelectionClosesAt <= now &&
+        (event.finalizedPlanId !== publishedPlan.planId ||
+          event.finalizedTableStateVersion !== event.tableStateVersion);
+      if (finalizationDue && publishedPlan) {
+        const finalizationEntityId =
+          `${event.eventId}:${publishedPlan.planId}:${event.tableStateVersion}`;
+        finalization = await capturePersisted(
+          repository,
+          actions,
+          "finalize",
+          finalizationEntityId,
+          event.guildId,
+          event.eventId,
+          now,
+          async () => {
+            await callbacks.finalizeEvent(event);
+          },
+        );
+      }
+
+      if (event.endsAt !== null && event.endsAt <= now && finalization === "completed") {
+        await capturePersisted(
+          repository,
+          actions,
+          "archive",
+          event.eventId,
+          event.guildId,
+          event.eventId,
+          now,
+          async () => {
+            await callbacks.archiveEvent(event);
+          },
+        );
+      }
+      continue;
+    }
+
     if (
-      ((event.status === "planned" || event.status === "published") &&
-        event.endsAt !== null &&
-        event.endsAt <= now) ||
+      (event.status === "planned" && event.endsAt !== null && event.endsAt <= now) ||
       event.status === "archived"
     ) {
       await capturePersisted(
@@ -328,6 +451,8 @@ export async function runScheduledTick(
 
   const reminders = await repository.listDueReminders(now, 25);
   for (const reminder of reminders) {
+    const reminderEvent = await repository.getWeeklyEvent(reminder.eventId);
+    if (!reminderEvent || !configByGuild.has(reminderEvent.guildId)) continue;
     await captureUnpersisted(actions, "reminder", reminder.deliveryId, () =>
       callbacks.deliverReminder(reminder),
     );

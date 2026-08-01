@@ -9,8 +9,10 @@ import {
 } from "./role-reconciler";
 import {
   GuildRepository,
+  type GuildConfig,
   type PlanBundle,
   type RoleLease,
+  type WeeklyEvent,
 } from "./storage/repository";
 import { UserFacingError } from "./interaction-utils";
 
@@ -87,7 +89,7 @@ export class RoleService {
     }
     if (!config.roleSyncEnabled && !dryRun) {
       throw new UserFacingError(
-        "Weekly role sync is disabled. Re-run /guild setup to enable it.",
+        "Weekly role sync is disabled. Enable role_sync with /guild automation first.",
       );
     }
 
@@ -100,15 +102,64 @@ export class RoleService {
       }
     }
     const desiredUserIds = bundle?.tables.map((table) => table.gmUserId) ?? [];
+    return this.reconcileLeasedRoles({
+      guildId,
+      config,
+      gmRoleId: config.gmRoleId,
+      event,
+      desiredUserIds,
+      dryRun,
+      mode: "sync",
+    });
+  }
+
+  /**
+   * Remove every role assignment owned by an active assistant lease, including
+   * leases for previously configured roles. Unleased/manual assignments are
+   * never candidates and therefore remain untouched.
+   */
+  async cleanupAllLeasedRoles(
+    guildId: string,
+    dryRun = false,
+  ): Promise<RoleReconciliationReport> {
+    const config = await this.repository.getGuildConfig(guildId);
+    if (!config?.gmRoleId) {
+      throw new UserFacingError(
+        "No weekly GM role is configured. Run /guild setup with gm_role first.",
+      );
+    }
+
+    const event = await this.repository.getCurrentPublishedEvent(guildId);
+    return this.reconcileLeasedRoles({
+      guildId,
+      config,
+      gmRoleId: config.gmRoleId,
+      event,
+      desiredUserIds: [],
+      dryRun,
+      mode: "cleanup",
+    });
+  }
+
+  private async reconcileLeasedRoles(input: {
+    guildId: string;
+    config: GuildConfig;
+    gmRoleId: string;
+    event: WeeklyEvent | null;
+    desiredUserIds: readonly string[];
+    dryRun: boolean;
+    mode: "sync" | "cleanup";
+  }): Promise<RoleReconciliationReport> {
+    const { guildId, config, gmRoleId, event, desiredUserIds, dryRun, mode } = input;
     const allLeases = await this.repository.listActiveRoleLeases(guildId);
     const historicalRoleIds = [...new Set(
       allLeases
         .map((lease) => lease.roleId)
-        .filter((roleId) => roleId !== config.gmRoleId),
+        .filter((roleId) => roleId !== gmRoleId),
     )].sort();
     // Reconcile the replacement role first so selected GMs receive it before
     // any assistant-owned historical role is removed.
-    const roleIds = [config.gmRoleId, ...historicalRoleIds];
+    const roleIds = [gmRoleId, ...historicalRoleIds];
     const reports: RoleReconciliationReport[] = [];
     const roleDetails: Array<{
       roleId: string;
@@ -119,7 +170,8 @@ export class RoleService {
 
     for (const roleId of roleIds) {
       const roleLeases = allLeases.filter((lease) => lease.roleId === roleId);
-      const desiredForRole = roleId === config.gmRoleId ? desiredUserIds : [];
+      const desiredForRole =
+        mode === "sync" && roleId === gmRoleId ? desiredUserIds : [];
       const leasedUserIds = roleLeases.map((lease) => lease.userId);
       const candidateIds = [...new Set([...desiredForRole, ...leasedUserIds])];
       const roleHolderIds = (
@@ -168,11 +220,13 @@ export class RoleService {
               if (lease) {
                 await this.repository.releaseRoleLease(
                   lease.leaseId,
-                  roleId === config.gmRoleId && event?.status === "archived"
-                    ? "Weekly event archived"
-                    : roleId === config.gmRoleId
-                      ? "GM no longer selected"
-                      : "Configured weekly GM role replaced",
+                  mode === "cleanup"
+                    ? "Weekly GM role configuration cleared"
+                    : roleId === gmRoleId && event?.status === "archived"
+                      ? "Weekly event archived"
+                      : roleId === gmRoleId
+                        ? "GM no longer selected"
+                        : "Configured weekly GM role replaced",
                 );
               }
             },
@@ -196,10 +250,18 @@ export class RoleService {
     await this.repository.appendAudit({
       guildId,
       eventId: event?.eventId,
-      action: dryRun ? "roles.previewed" : "roles.reconciled",
+      action:
+        mode === "cleanup"
+          ? dryRun
+            ? "roles.cleanup-previewed"
+            : "roles.cleaned-up"
+          : dryRun
+            ? "roles.previewed"
+            : "roles.reconciled",
       entityType: "role",
-      entityId: config.gmRoleId,
+      entityId: gmRoleId,
       details: {
+        mode,
         ok: report.ok,
         adds: report.plan.addRoleUserIds,
         removes: report.plan.removeRoleUserIds,
@@ -212,6 +274,28 @@ export class RoleService {
     });
     return report;
   }
+}
+
+/** Convert a report-style partial failure into a retryable operation failure. */
+export function requireSuccessfulRoleReconciliation(
+  report: RoleReconciliationReport,
+  operation = "GM role reconciliation",
+): RoleReconciliationReport {
+  if (report.ok) return report;
+
+  const failures = report.outcomes.filter((outcome) => outcome.status === "failed");
+  const details = failures
+    .slice(0, 3)
+    .map(
+      (failure) =>
+        `${failure.action} for user ${failure.userId}: ${failure.error ?? failure.detail}`,
+    )
+    .join("; ");
+  throw new UserFacingError(
+    `${operation} failed for ${failures.length || 1} action${failures.length === 1 ? "" : "s"}.` +
+      (details ? ` ${details}.` : "") +
+      " Review the role permissions or recorded lease failure, then retry.",
+  );
 }
 
 export function formatRoleReport(report: RoleReconciliationReport): string {
@@ -241,12 +325,19 @@ export function formatRoleReport(report: RoleReconciliationReport): string {
   return lines.join("\n");
 }
 
-export function formatRoleDiagnostics(report: RoleDiagnosticReport): string {
+export function formatRoleDiagnostics(
+  report: RoleDiagnosticReport,
+  includeHeading = true,
+): string {
   const icon = { pass: "✅", warn: "⚠️", fail: "❌" } as const;
   return [
-    report.ready
-      ? "## Guild Assistant doctor — ready"
-      : "## Guild Assistant doctor — action required",
+    ...(includeHeading
+      ? [
+          report.ready
+            ? "## Guild Assistant doctor — ready"
+            : "## Guild Assistant doctor — action required",
+        ]
+      : []),
     ...report.items.map(
       (item) =>
         icon[item.status] +

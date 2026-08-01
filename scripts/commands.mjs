@@ -13,25 +13,22 @@ export const commands = [
     description: "Configure and diagnose the guild assistant.",
     type: 1,
     default_member_permissions: "32",
-    dm_permission: false,
     options: [
       {
         type: 1,
         name: "setup",
-        description: "Create or update this server's weekly-game configuration.",
+        description: "Show setup guidance or update only the settings you provide.",
         options: [
           {
             type: 7,
             name: "channel",
-            description: "Channel for signup, table, and reminder posts.",
+            description: "Required once: channel for signup, table, and reminder posts.",
             channel_types: channelTypes,
-            required: true,
           },
           {
             type: 8,
             name: "gm_role",
-            description: "Temporary role owned by the assistant for selected weekly GMs.",
-            required: true,
+            description: "Optional normal Weekly GM role; the bot role must be above it.",
           },
           {
             type: 8,
@@ -51,9 +48,16 @@ export const commands = [
           {
             type: 4,
             name: "weekday",
-            description: "Game day: 1 Monday through 7 Sunday.",
-            min_value: 1,
-            max_value: 7,
+            description: "Local game day.",
+            choices: [
+              { name: "Monday", value: 1 },
+              { name: "Tuesday", value: 2 },
+              { name: "Wednesday", value: 3 },
+              { name: "Thursday", value: 4 },
+              { name: "Friday", value: 5 },
+              { name: "Saturday", value: 6 },
+              { name: "Sunday", value: 7 },
+            ],
           },
           {
             type: 3,
@@ -63,21 +67,21 @@ export const commands = [
           {
             type: 4,
             name: "minimum",
-            description: "Minimum players per viable table.",
+            description: "Smallest viable table; recommended 4.",
             min_value: 1,
             max_value: 20,
           },
           {
             type: 4,
             name: "preferred",
-            description: "Preferred players per table.",
+            description: "Planner target before opening another table; recommended 6.",
             min_value: 1,
             max_value: 20,
           },
           {
             type: 4,
             name: "maximum",
-            description: "Maximum players per table.",
+            description: "Hard seat cap before a table waitlist; recommended 6.",
             min_value: 1,
             max_value: 20,
           },
@@ -97,13 +101,52 @@ export const commands = [
           },
           {
             type: 5,
-            name: "scheduling_enabled",
-            description: "Enable cron automation after /guild doctor passes.",
+            name: "clear_gm_role",
+            description: "Clear the optional Weekly GM role and pause role synchronization.",
           },
           {
             type: 5,
-            name: "role_sync_enabled",
-            description: "Enable automatic weekly GM-role reconciliation.",
+            name: "clear_reminder_role",
+            description: "Clear the optional reminder audience role.",
+          },
+          {
+            type: 5,
+            name: "clear_admin_role",
+            description: "Clear the optional organizer escalation role.",
+          },
+        ],
+      },
+      {
+        type: 1,
+        name: "automation",
+        description: "Safely pause, review, or run the complete weekly lifecycle on autopilot.",
+        options: [
+          {
+            type: 3,
+            name: "mode",
+            description: "Paused, scheduled with manual publish, or hands-off autopilot.",
+            required: true,
+            choices: [
+              { name: "Paused", value: "paused" },
+              { name: "Review before publish", value: "review" },
+              { name: "Autopilot", value: "autopilot" },
+            ],
+          },
+          {
+            type: 5,
+            name: "confirm",
+            description: "Must be True to change automation mode.",
+            required: true,
+          },
+          {
+            type: 5,
+            name: "role_sync",
+            description: "Also reconcile the optional Weekly GM role automatically.",
+          },
+          {
+            type: 5,
+            name: "reminders",
+            description: "Enable/disable the safe default pre-lock reminder rule.",
           },
         ],
       },
@@ -124,7 +167,6 @@ export const commands = [
     description: "Run the weekly signup and table lifecycle.",
     type: 1,
     default_member_permissions: "32",
-    dm_permission: false,
     options: [
       {
         type: 1,
@@ -236,6 +278,19 @@ export const commands = [
       },
       {
         type: 1,
+        name: "export",
+        description: "Download a private, formula-safe CSV roster snapshot.",
+        options: [
+          {
+            type: 3,
+            name: "event_id",
+            description: "Optional archived event ID; defaults to the active or latest week.",
+            max_length: 100,
+          },
+        ],
+      },
+      {
+        type: 1,
         name: "cancel",
         description: "Cancel an unfinished or published week with an audited reason.",
         options: [
@@ -265,6 +320,7 @@ export const commands = [
               { name: "Lock signups", value: "lock" },
               { name: "Send reminder", value: "remind" },
               { name: "Reconcile GM roles", value: "roles" },
+              { name: "Finalize table manifest", value: "finalize" },
             ],
           },
         ],
@@ -283,6 +339,8 @@ export const commands = [
               { name: "Open signups", value: "open" },
               { name: "Lock signups and plan", value: "lock" },
               { name: "Send reminder", value: "remind" },
+              { name: "Publish tables", value: "publish" },
+              { name: "Finalize table manifest", value: "finalize" },
               { name: "Archive week", value: "archive" },
             ],
           },
@@ -309,7 +367,6 @@ export const commands = [
     description: "Repair assistant-owned weekly roles.",
     type: 1,
     default_member_permissions: "32",
-    dm_permission: false,
     options: [
       {
         type: 1,
@@ -330,7 +387,6 @@ export const commands = [
     description: "Configure or send safe role-mention reminders.",
     type: 1,
     default_member_permissions: "32",
-    dm_permission: false,
     options: [
       {
         type: 1,

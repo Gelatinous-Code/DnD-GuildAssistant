@@ -1,3 +1,10 @@
+import {
+  WEEKLY_ROSTER_MAX_ASSIGNMENTS,
+  WEEKLY_ROSTER_MAX_ROWS,
+  WEEKLY_ROSTER_MAX_TABLES,
+  WeeklyExportLimitError,
+} from "../weekly-export-contract";
+
 export type EventStatus =
   | "draft"
   | "open"
@@ -52,6 +59,7 @@ export interface GuildConfig {
   maxPlayersPerTable?: number;
   schedulingEnabled: boolean;
   roleSyncEnabled: boolean;
+  autoPublishEnabled: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -62,9 +70,9 @@ export interface GuildConfigPatch {
   eventChannelId?: string;
   tableChannelId?: string;
   reminderChannelId?: string;
-  adminRoleId?: string;
-  gmRoleId?: string;
-  reminderRoleId?: string;
+  adminRoleId?: string | null;
+  gmRoleId?: string | null;
+  reminderRoleId?: string | null;
   timezone?: string;
   weeklyDay?: number;
   weeklyWeekday?: number;
@@ -82,6 +90,7 @@ export interface GuildConfigPatch {
   maxPlayersPerTable?: number;
   schedulingEnabled?: boolean;
   roleSyncEnabled?: boolean;
+  autoPublishEnabled?: boolean;
 }
 
 export interface WeeklyEvent {
@@ -92,6 +101,7 @@ export interface WeeklyEvent {
   endsAt: number | null;
   signupOpensAt: number;
   signupLocksAt: number;
+  tableSelectionClosesAt: number;
   reminderAt?: number | null;
   status: EventStatus;
   source: SignupSource;
@@ -100,6 +110,12 @@ export interface WeeklyEvent {
   signupMessageId: string | null;
   tableChannelId: string | null;
   tableMessageId: string | null;
+  finalManifestChannelId: string | null;
+  finalManifestMessageId: string | null;
+  tableStateVersion: number;
+  finalizedPlanId: string | null;
+  finalizedTableStateVersion: number | null;
+  tablesFinalizedAt: number | null;
   createdByUserId: string | null;
   createdAt: number;
   updatedAt: number;
@@ -115,6 +131,7 @@ export interface CreateWeeklyEventInput {
   endsAt?: number;
   signupOpensAt: number;
   signupLocksAt: number;
+  tableSelectionClosesAt?: number;
   reminderAt?: number;
   status?: EventStatus;
   source?: SignupSource;
@@ -216,6 +233,12 @@ export interface PlanBundle {
   assignments: Assignment[];
 }
 
+export interface WeeklyExportSnapshot {
+  event: WeeklyEvent;
+  signups: Signup[];
+  planBundle: PlanBundle | null;
+}
+
 export interface JoinTableResult {
   outcome: "assigned" | "waitlisted";
   position: number | null;
@@ -227,6 +250,13 @@ export interface LeaveTableResult {
   left: boolean;
   assignment: Assignment | null;
   promoted: Assignment | null;
+}
+
+export class TableSelectionUnavailableError extends Error {
+  constructor() {
+    super("Table selection is closed or the published plan changed");
+    this.name = "TableSelectionUnavailableError";
+  }
 }
 
 export interface GmSelectionStats {
@@ -352,6 +382,7 @@ type GuildConfigRow = {
   table_max_size: number;
   scheduling_enabled: number;
   role_sync_enabled: number;
+  auto_publish_enabled: number;
   created_at: number;
   updated_at: number;
 };
@@ -364,6 +395,7 @@ type WeeklyEventRow = {
   ends_at: number | null;
   signup_opens_at: number;
   signup_locks_at: number;
+  table_selection_closes_at: number | null;
   reminder_at: number | null;
   status: EventStatus;
   source: SignupSource;
@@ -372,6 +404,12 @@ type WeeklyEventRow = {
   signup_message_id: string | null;
   table_channel_id: string | null;
   table_message_id: string | null;
+  final_manifest_channel_id: string | null;
+  final_manifest_message_id: string | null;
+  table_state_version: number;
+  finalized_plan_id: string | null;
+  finalized_table_state_version: number | null;
+  tables_finalized_at: number | null;
   created_by_user_id: string | null;
   created_at: number;
   updated_at: number;
@@ -555,6 +593,7 @@ function guildConfigFromRow(row: GuildConfigRow): GuildConfig {
     maxPlayersPerTable: row.table_max_size,
     schedulingEnabled: row.scheduling_enabled === 1,
     roleSyncEnabled: row.role_sync_enabled === 1,
+    autoPublishEnabled: row.auto_publish_enabled === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -569,6 +608,7 @@ function eventFromRow(row: WeeklyEventRow): WeeklyEvent {
     endsAt: row.ends_at,
     signupOpensAt: row.signup_opens_at,
     signupLocksAt: row.signup_locks_at,
+    tableSelectionClosesAt: row.table_selection_closes_at ?? row.starts_at,
     reminderAt: row.reminder_at,
     status: row.status,
     source: row.source,
@@ -577,6 +617,12 @@ function eventFromRow(row: WeeklyEventRow): WeeklyEvent {
     signupMessageId: row.signup_message_id,
     tableChannelId: row.table_channel_id,
     tableMessageId: row.table_message_id,
+    finalManifestChannelId: row.final_manifest_channel_id,
+    finalManifestMessageId: row.final_manifest_message_id,
+    tableStateVersion: row.table_state_version ?? 0,
+    finalizedPlanId: row.finalized_plan_id ?? null,
+    finalizedTableStateVersion: row.finalized_table_state_version ?? null,
+    tablesFinalizedAt: row.tables_finalized_at ?? null,
     createdByUserId: row.created_by_user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -757,9 +803,9 @@ export class GuildRepository {
              event_channel_id = COALESCE(?, event_channel_id),
              table_channel_id = COALESCE(?, table_channel_id),
              reminder_channel_id = COALESCE(?, reminder_channel_id),
-             admin_role_id = COALESCE(?, admin_role_id),
-             gm_role_id = COALESCE(?, gm_role_id),
-             reminder_role_id = COALESCE(?, reminder_role_id),
+             admin_role_id = CASE WHEN ? = 1 THEN ? ELSE admin_role_id END,
+             gm_role_id = CASE WHEN ? = 1 THEN ? ELSE gm_role_id END,
+             reminder_role_id = CASE WHEN ? = 1 THEN ? ELSE reminder_role_id END,
              timezone = COALESCE(?, timezone),
              weekly_day = COALESCE(?, weekly_day),
              weekly_time = COALESCE(?, weekly_time),
@@ -771,6 +817,7 @@ export class GuildRepository {
              table_max_size = COALESCE(?, table_max_size),
              scheduling_enabled = COALESCE(?, scheduling_enabled),
              role_sync_enabled = COALESCE(?, role_sync_enabled),
+             auto_publish_enabled = COALESCE(?, auto_publish_enabled),
              updated_at = ?
            WHERE guild_id = ?`,
         )
@@ -778,8 +825,11 @@ export class GuildRepository {
           asNullable(input.announcementChannelId ?? input.eventChannelId),
           asNullable(input.tableChannelId),
           asNullable(input.reminderChannelId),
+          Number(input.adminRoleId !== undefined),
           asNullable(input.adminRoleId),
+          Number(input.gmRoleId !== undefined),
           asNullable(input.gmRoleId),
+          Number(input.reminderRoleId !== undefined),
           asNullable(input.reminderRoleId),
           asNullable(input.timezone),
           asNullable(input.weeklyWeekday ?? input.weeklyDay),
@@ -792,6 +842,7 @@ export class GuildRepository {
           asNullable(input.maxPlayersPerTable ?? input.tableMaxSize),
           input.schedulingEnabled === undefined ? null : Number(input.schedulingEnabled),
           input.roleSyncEnabled === undefined ? null : Number(input.roleSyncEnabled),
+          input.autoPublishEnabled === undefined ? null : Number(input.autoPublishEnabled),
           now,
           input.guildId,
         ),
@@ -807,9 +858,9 @@ export class GuildRepository {
       .prepare(
         `INSERT INTO weekly_events (
            event_id, guild_id, title, starts_at, ends_at, signup_opens_at,
-           signup_locks_at, reminder_at, status, source, source_external_id,
+           signup_locks_at, table_selection_closes_at, reminder_at, status, source, source_external_id,
            created_by_user_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         input.eventId,
@@ -819,6 +870,7 @@ export class GuildRepository {
         asNullable(input.endsAt),
         input.signupOpensAt,
         input.signupLocksAt,
+        input.tableSelectionClosesAt ?? input.startsAt,
         asNullable(input.reminderAt),
         input.status ?? "draft",
         input.source ?? "native",
@@ -837,6 +889,19 @@ export class GuildRepository {
     const row = await this.db
       .prepare("SELECT * FROM weekly_events WHERE event_id = ?")
       .bind(eventId)
+      .first<WeeklyEventRow>();
+    return row ? eventFromRow(row) : null;
+  }
+
+  async getLatestWeeklyEvent(guildId: string): Promise<WeeklyEvent | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT * FROM weekly_events
+         WHERE guild_id = ?
+         ORDER BY starts_at DESC
+         LIMIT 1`,
+      )
+      .bind(guildId)
       .first<WeeklyEventRow>();
     return row ? eventFromRow(row) : null;
   }
@@ -866,6 +931,156 @@ export class GuildRepository {
     return row ? eventFromRow(row) : null;
   }
 
+  /**
+   * Read one complete export view in a single D1 batch transaction. Each
+   * statement repeats the same tenant-scoped event and authoritative-plan
+   * selection so no application-side identifier from an earlier read is
+   * needed to construct a later query.
+   */
+  async getWeeklyExportSnapshot(
+    guildId: string,
+    eventId?: string,
+  ): Promise<WeeklyExportSnapshot | null> {
+    const selectionValues: Array<string | number> = eventId
+      ? [eventId, guildId]
+      : [guildId, this.now()];
+    const selectedEventSql = eventId
+      ? `SELECT * FROM weekly_events
+         WHERE event_id = ?1 AND guild_id = ?2
+         LIMIT 1`
+      : `SELECT * FROM weekly_events
+         WHERE guild_id = ?1
+         ORDER BY
+           CASE WHEN status NOT IN ('archived', 'cancelled') THEN 0 ELSE 1 END ASC,
+           CASE
+             WHEN status NOT IN ('archived', 'cancelled') AND starts_at > ?2 THEN 0
+             WHEN status NOT IN ('archived', 'cancelled') THEN 1
+             ELSE 2
+           END ASC,
+           CASE
+             WHEN status NOT IN ('archived', 'cancelled') AND starts_at > ?2
+             THEN starts_at
+           END ASC,
+           CASE
+             WHEN status NOT IN ('archived', 'cancelled') AND starts_at <= ?2
+             THEN starts_at
+           END DESC,
+           CASE
+             WHEN status IN ('archived', 'cancelled') THEN starts_at
+           END DESC
+         LIMIT 1`;
+    const selectedEventCte = `selected_event AS (${selectedEventSql})`;
+    const selectedPlanCte = `selected_plan AS (
+      SELECT plans.*
+      FROM plans
+      INNER JOIN selected_event event ON event.event_id = plans.event_id
+      WHERE plans.status IN ('draft', 'published')
+      ORDER BY
+        CASE plans.status WHEN 'published' THEN 0 ELSE 1 END,
+        plans.generation DESC
+      LIMIT 1
+    )`;
+
+    const results = await this.db.batch<
+      WeeklyEventRow | SignupRow | PlanRow | PlanTableRow | AssignmentRow
+    >([
+      this.db
+        .prepare(`WITH ${selectedEventCte} SELECT * FROM selected_event`)
+        .bind(...selectionValues),
+      this.db
+        .prepare(
+          `WITH ${selectedEventCte}
+           SELECT signups.*
+           FROM signups
+           INNER JOIN selected_event event ON event.event_id = signups.event_id
+           ORDER BY
+             CASE WHEN signups.status = 'active' THEN 0 ELSE 1 END,
+             signups.signup_kind ASC,
+             signups.signed_up_at ASC,
+             signups.user_id ASC
+           LIMIT ?3`,
+        )
+        .bind(...selectionValues, WEEKLY_ROSTER_MAX_ROWS + 1),
+      this.db
+        .prepare(
+          `WITH ${selectedEventCte}, ${selectedPlanCte}
+           SELECT * FROM selected_plan`,
+        )
+        .bind(...selectionValues),
+      this.db
+        .prepare(
+          `WITH ${selectedEventCte}, ${selectedPlanCte}
+           SELECT plan_tables.*
+           FROM plan_tables
+           INNER JOIN selected_plan plan ON plan.plan_id = plan_tables.plan_id
+           ORDER BY plan_tables.table_number ASC
+           LIMIT ?3`,
+        )
+        .bind(...selectionValues, WEEKLY_ROSTER_MAX_TABLES + 1),
+      this.db
+        .prepare(
+          `WITH ${selectedEventCte}, ${selectedPlanCte}
+           SELECT assignments.*
+           FROM assignments
+           INNER JOIN selected_plan plan ON plan.plan_id = assignments.plan_id
+           ORDER BY
+             CASE assignments.status
+               WHEN 'assigned' THEN 0
+               WHEN 'unassigned' THEN 1
+               WHEN 'waitlisted' THEN 2
+               ELSE 3
+             END,
+             assignments.waitlist_position ASC,
+             assignments.display_name ASC
+           LIMIT ?3`,
+        )
+        .bind(...selectionValues, WEEKLY_ROSTER_MAX_ASSIGNMENTS + 1),
+    ]);
+
+    const eventRows = (results[0]?.results ?? []) as WeeklyEventRow[];
+    const signupRows = (results[1]?.results ?? []) as SignupRow[];
+    const planRows = (results[2]?.results ?? []) as PlanRow[];
+    const tableRows = (results[3]?.results ?? []) as PlanTableRow[];
+    const assignmentRows = (results[4]?.results ?? []) as AssignmentRow[];
+    const eventRow = eventRows[0];
+    if (!eventRow) return null;
+
+    if (signupRows.length > WEEKLY_ROSTER_MAX_ROWS) {
+      throw new WeeklyExportLimitError(
+        "rows",
+        WEEKLY_ROSTER_MAX_ROWS,
+        signupRows.length,
+      );
+    }
+    if (assignmentRows.length > WEEKLY_ROSTER_MAX_ASSIGNMENTS) {
+      throw new WeeklyExportLimitError(
+        "assignments",
+        WEEKLY_ROSTER_MAX_ASSIGNMENTS,
+        assignmentRows.length,
+      );
+    }
+    if (tableRows.length > WEEKLY_ROSTER_MAX_TABLES) {
+      throw new WeeklyExportLimitError(
+        "tables",
+        WEEKLY_ROSTER_MAX_TABLES,
+        tableRows.length,
+      );
+    }
+
+    const planRow = planRows[0];
+    return {
+      event: eventFromRow(eventRow),
+      signups: signupRows.map(signupFromRow),
+      planBundle: planRow
+        ? {
+            plan: planFromRow(planRow),
+            tables: tableRows.map(tableFromRow),
+            assignments: assignmentRows.map(assignmentFromRow),
+          }
+        : null,
+    };
+  }
+
   async getCurrentPublishedEvent(guildId: string): Promise<WeeklyEvent | null> {
     const now = this.now();
     const row = await this.db
@@ -889,19 +1104,29 @@ export class GuildRepository {
         `SELECT * FROM weekly_events
          WHERE (
            status NOT IN ('archived', 'cancelled')
-           AND (signup_opens_at <= ? OR signup_locks_at <= ? OR starts_at <= ?)
-         ) OR (
-           status = 'archived'
-           AND EXISTS (
-             SELECT 1 FROM role_leases
-             WHERE role_leases.guild_id = weekly_events.guild_id
-               AND role_leases.event_id = weekly_events.event_id
-               AND role_leases.released_at IS NULL
+           AND (
+             signup_opens_at <= ? OR signup_locks_at <= ?
+             OR COALESCE(table_selection_closes_at, starts_at) <= ? OR starts_at <= ?
            )
-         )
+          ) OR (
+            status = 'archived'
+            AND (
+              EXISTS (
+                SELECT 1 FROM role_leases
+                WHERE role_leases.guild_id = weekly_events.guild_id
+                  AND role_leases.event_id = weekly_events.event_id
+                  AND role_leases.released_at IS NULL
+              ) OR EXISTS (
+                SELECT 1 FROM operations
+                WHERE operations.event_id = weekly_events.event_id
+                  AND operations.operation_kind = 'scheduler-archive'
+                  AND operations.status = 'failed'
+              )
+            )
+          )
          ORDER BY starts_at ASC`,
       )
-      .bind(through, through, through)
+      .bind(through, through, through, through)
       .all<WeeklyEventRow>();
     return result.results.map(eventFromRow);
   }
@@ -952,6 +1177,55 @@ export class GuildRepository {
         eventId,
       )
       .run();
+  }
+
+  async setFinalManifest(
+    eventId: string,
+    channelId: string,
+    messageId: string,
+    planId: string,
+    tableStateVersion: number,
+    finalizedAt: number,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `UPDATE weekly_events SET
+           final_manifest_channel_id = ?,
+           final_manifest_message_id = ?,
+           finalized_plan_id = ?,
+           finalized_table_state_version = ?,
+           tables_finalized_at = ?,
+           updated_at = ?
+         WHERE event_id = ?
+           AND status IN ('published', 'archived')
+           AND table_state_version = ?
+           AND EXISTS (
+             SELECT 1 FROM plans
+             WHERE plans.plan_id = ?
+               AND plans.event_id = weekly_events.event_id
+               AND plans.status = 'published'
+           )
+           AND (
+             final_manifest_message_id IS NULL OR (
+               final_manifest_channel_id = ? AND final_manifest_message_id = ?
+             )
+           )`,
+      )
+      .bind(
+        channelId,
+        messageId,
+        planId,
+        tableStateVersion,
+        finalizedAt,
+        this.now(),
+        eventId,
+        tableStateVersion,
+        planId,
+        channelId,
+        messageId,
+      )
+      .run();
+    return result.meta.changes === 1;
   }
 
   async saveSignup(input: SaveSignupInput): Promise<Signup> {
@@ -1025,6 +1299,20 @@ export class GuildRepository {
           )
           .bind(eventId);
     const result = await statement.all<SignupRow>();
+    return result.results.map(signupFromRow);
+  }
+
+  async listAllSignups(eventId: string): Promise<Signup[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT * FROM signups
+         WHERE event_id = ?
+         ORDER BY
+           CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+           signup_kind ASC, signed_up_at ASC, user_id ASC`,
+      )
+      .bind(eventId)
+      .all<SignupRow>();
     return result.results.map(signupFromRow);
   }
 
@@ -1314,10 +1602,13 @@ export class GuildRepository {
         .bind(now, input.planId, input.eventId),
       this.db
         .prepare(
-          `UPDATE weekly_events SET status = 'published', published_at = ?, updated_at = ?
+          `UPDATE weekly_events SET
+             status = 'published', published_at = ?, updated_at = ?,
+             table_state_version = table_state_version + 1
            WHERE event_id = ? AND guild_id = ?
-             AND status IN ('locked', 'planned', 'published')
-             AND EXISTS (
+              AND status IN ('locked', 'planned', 'published')
+              AND changes() = 1
+              AND EXISTS (
                SELECT 1 FROM plans target
                WHERE target.plan_id = ? AND target.event_id = weekly_events.event_id
                  AND target.status = 'published'
@@ -1361,6 +1652,74 @@ export class GuildRepository {
       .bind(planId, userId)
       .first<AssignmentRow>();
     return row ? assignmentFromRow(row) : null;
+  }
+
+  async ensureUnassignedAssignment(input: {
+    assignmentId: string;
+    planId: string;
+    userId: string;
+    displayName: string;
+  }): Promise<Assignment> {
+    const now = this.now();
+    await this.db.batch([
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO assignments (
+             assignment_id, plan_id, table_id, desired_table_id, user_id,
+             display_name, status, waitlist_position, assigned_at, updated_at
+           )
+           SELECT ?, ?, NULL, NULL, ?, ?, 'unassigned', NULL, NULL, ?
+           FROM plans plan
+           JOIN signups signup
+             ON signup.event_id = plan.event_id AND signup.user_id = ?
+           WHERE plan.plan_id = ? AND plan.status = 'published'
+             AND signup.status = 'active' AND signup.signup_kind = 'player'`,
+        )
+        .bind(
+          input.assignmentId,
+          input.planId,
+          input.userId,
+          input.displayName,
+          now,
+          input.userId,
+          input.planId,
+        ),
+      this.db
+        .prepare(
+          `UPDATE assignments SET
+             display_name = ?,
+             table_id = CASE WHEN status = 'withdrawn' THEN NULL ELSE table_id END,
+             desired_table_id = CASE WHEN status = 'withdrawn' THEN NULL ELSE desired_table_id END,
+             status = CASE WHEN status = 'withdrawn' THEN 'unassigned' ELSE status END,
+             waitlist_position = CASE WHEN status = 'withdrawn' THEN NULL ELSE waitlist_position END,
+             assigned_at = CASE WHEN status = 'withdrawn' THEN NULL ELSE assigned_at END,
+             updated_at = ?
+           WHERE plan_id = ? AND user_id = ? AND EXISTS (
+             SELECT 1
+             FROM plans plan
+             JOIN signups signup
+               ON signup.event_id = plan.event_id AND signup.user_id = assignments.user_id
+             WHERE plan.plan_id = assignments.plan_id AND plan.status = 'published'
+               AND signup.status = 'active' AND signup.signup_kind = 'player'
+           )`,
+        )
+        .bind(input.displayName, now, input.planId, input.userId),
+      this.db
+        .prepare(
+          `UPDATE weekly_events SET
+             table_state_version = table_state_version + 1,
+             updated_at = ?
+           WHERE event_id = (SELECT event_id FROM plans WHERE plan_id = ?)
+             AND changes() = 1`,
+        )
+        .bind(now, input.planId),
+    ]);
+
+    const assignment = await this.getAssignment(input.planId, input.userId);
+    if (!assignment) {
+      throw new Error("An active player assignment could not be created or found");
+    }
+    return assignment;
   }
 
   private async getNextWaitlisted(
@@ -1431,9 +1790,13 @@ export class GuildRepository {
                    AND occupied.status = 'assigned'
                    AND occupied.user_id <> ?
                ) AS occupied_count
-             FROM plan_tables t
-             JOIN plans p ON p.plan_id = t.plan_id
-             WHERE t.table_id = ? AND t.plan_id = ? AND p.status = 'published'
+              FROM plan_tables t
+              JOIN plans p ON p.plan_id = t.plan_id
+              JOIN weekly_events weekly ON weekly.event_id = p.event_id
+              WHERE t.table_id = ? AND t.plan_id = ? AND p.status = 'published'
+                AND weekly.status = 'published'
+                AND COALESCE(weekly.table_selection_closes_at, weekly.starts_at)
+                  > CAST(strftime('%s', 'now') AS INTEGER) * 1000
            ), availability AS (
              SELECT CASE WHEN occupied_count < capacity THEN 1 ELSE 0 END AS has_space
              FROM target
@@ -1463,11 +1826,20 @@ export class GuildRepository {
           userId, tableId, planId, tableId, tableId, tableId, planId, tableId,
           userId, now, now, planId, userId,
         ),
+      this.db
+        .prepare(
+          `UPDATE weekly_events SET
+             table_state_version = table_state_version + 1,
+             updated_at = ?
+           WHERE event_id = (SELECT event_id FROM plans WHERE plan_id = ?)
+             AND changes() = 1`,
+        )
+        .bind(now, planId),
       this.promoteNextStatement(planId, vacatedTableId, now),
     ]);
 
     if (results[0]?.meta.changes !== 1) {
-      throw new Error("The table does not exist, is not published, or the player is inactive");
+      throw new TableSelectionUnavailableError();
     }
     const assignment = await this.getAssignment(planId, userId);
     if (!assignment || (assignment.status !== 'assigned' && assignment.status !== 'waitlisted')) {
@@ -1499,11 +1871,34 @@ export class GuildRepository {
              table_id = NULL, desired_table_id = NULL, status = 'unassigned',
              waitlist_position = NULL,
              assigned_at = NULL, updated_at = ?
-           WHERE plan_id = ? AND user_id = ? AND status IN ('assigned', 'waitlisted')`,
+           WHERE plan_id = ? AND user_id = ? AND status IN ('assigned', 'waitlisted')
+             AND EXISTS (
+               SELECT 1 FROM plans
+               JOIN weekly_events ON weekly_events.event_id = plans.event_id
+               WHERE plans.plan_id = assignments.plan_id
+                 AND plans.status = 'published'
+                 AND weekly_events.status = 'published'
+                 AND COALESCE(
+                   weekly_events.table_selection_closes_at,
+                   weekly_events.starts_at
+                 ) > CAST(strftime('%s', 'now') AS INTEGER) * 1000
+             )`,
         )
         .bind(now, planId, userId),
+      this.db
+        .prepare(
+          `UPDATE weekly_events SET
+             table_state_version = table_state_version + 1,
+             updated_at = ?
+           WHERE event_id = (SELECT event_id FROM plans WHERE plan_id = ?)
+             AND changes() = 1`,
+        )
+        .bind(now, planId),
       this.promoteNextStatement(planId, vacatedTableId, now),
     ]);
+    if (results[0]?.meta.changes !== 1) {
+      throw new TableSelectionUnavailableError();
+    }
     const assignment = await this.getAssignment(planId, userId);
     const promoted = promotionCandidate
       ? await this.getAssignment(planId, promotionCandidate.userId)
@@ -1535,6 +1930,15 @@ export class GuildRepository {
            WHERE plan_id = ? AND user_id = ? AND status <> 'withdrawn'`,
         )
         .bind(now, planId, userId),
+      this.db
+        .prepare(
+          `UPDATE weekly_events SET
+             table_state_version = table_state_version + 1,
+             updated_at = ?
+           WHERE event_id = (SELECT event_id FROM plans WHERE plan_id = ?)
+             AND changes() = 1`,
+        )
+        .bind(now, planId),
       this.promoteNextStatement(planId, vacatedTableId, now),
     ]);
     const assignment = await this.getAssignment(planId, userId);
@@ -1549,16 +1953,27 @@ export class GuildRepository {
   }
 
   async unassignPlayer(planId: string, userId: string): Promise<boolean> {
-    const result = await this.db
-      .prepare(
-        `UPDATE assignments SET
-           table_id = NULL, desired_table_id = NULL, status = 'unassigned',
-           waitlist_position = NULL, assigned_at = NULL, updated_at = ?
-         WHERE plan_id = ? AND user_id = ? AND status <> 'withdrawn'`,
-      )
-      .bind(this.now(), planId, userId)
-      .run();
-    return result.meta.changes === 1;
+    const now = this.now();
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE assignments SET
+             table_id = NULL, desired_table_id = NULL, status = 'unassigned',
+             waitlist_position = NULL, assigned_at = NULL, updated_at = ?
+           WHERE plan_id = ? AND user_id = ? AND status <> 'withdrawn'`,
+        )
+        .bind(now, planId, userId),
+      this.db
+        .prepare(
+          `UPDATE weekly_events SET
+             table_state_version = table_state_version + 1,
+             updated_at = ?
+           WHERE event_id = (SELECT event_id FROM plans WHERE plan_id = ?)
+             AND changes() = 1`,
+        )
+        .bind(now, planId),
+    ]);
+    return results[0]?.meta.changes === 1;
   }
 
   async listGmSelectionStats(guildId: string): Promise<GmSelectionStats[]> {
@@ -1784,11 +2199,18 @@ export class GuildRepository {
     const staleBefore = now - leaseTimeoutMs;
     const result = await this.db
       .prepare(
-        `SELECT * FROM reminder_deliveries
-         WHERE (status = 'pending' AND scheduled_for <= ?)
-            OR (status = 'failed' AND next_attempt_at IS NOT NULL AND next_attempt_at <= ?)
-            OR (status = 'sending' AND updated_at <= ?)
-         ORDER BY COALESCE(next_attempt_at, scheduled_for) ASC, delivery_id ASC
+        `SELECT deliveries.*
+         FROM reminder_deliveries deliveries
+         JOIN weekly_events events ON events.event_id = deliveries.event_id
+         JOIN guild_config config ON config.guild_id = events.guild_id
+         WHERE config.scheduling_enabled = 1 AND (
+           (deliveries.status = 'pending' AND deliveries.scheduled_for <= ?)
+           OR (deliveries.status = 'failed' AND deliveries.next_attempt_at IS NOT NULL
+             AND deliveries.next_attempt_at <= ?)
+           OR (deliveries.status = 'sending' AND deliveries.updated_at <= ?)
+         )
+         ORDER BY COALESCE(deliveries.next_attempt_at, deliveries.scheduled_for) ASC,
+           deliveries.delivery_id ASC
          LIMIT ?`,
       )
       .bind(now, now, staleBefore, limit)

@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_OPERATION_LEASE_MS,
   GuildRepository,
+  TableSelectionUnavailableError,
 } from "../src/storage/repository";
+import {
+  WEEKLY_ROSTER_MAX_ASSIGNMENTS,
+  WEEKLY_ROSTER_MAX_ROWS,
+  WEEKLY_ROSTER_MAX_TABLES,
+  WeeklyExportLimitError,
+} from "../src/weekly-export-contract";
 
 function result(changes = 0): D1Result {
   return {
@@ -19,6 +26,10 @@ function result(changes = 0): D1Result {
       changes,
     },
   };
+}
+
+function rowsResult<T>(rows: T[]): D1Result<T> {
+  return { ...result(), results: rows } as D1Result<T>;
 }
 
 class FakeStatement {
@@ -80,6 +91,7 @@ const eventRow = {
   ends_at: 2_000,
   signup_opens_at: 100,
   signup_locks_at: 900,
+  table_selection_closes_at: 1_000,
   reminder_at: null,
   status: "published",
   source: "native",
@@ -88,11 +100,70 @@ const eventRow = {
   signup_message_id: "message-1",
   table_channel_id: "channel-2",
   table_message_id: null,
+  final_manifest_channel_id: null,
+  final_manifest_message_id: null,
   created_by_user_id: null,
   created_at: 100,
   updated_at: 200,
   published_at: 200,
   archived_at: null,
+};
+
+const signupRow = {
+  event_id: "event-1",
+  user_id: "player-1",
+  display_name: "Player One",
+  signup_kind: "player",
+  status: "active",
+  source: "native",
+  source_external_id: null,
+  signed_up_at: 100,
+  withdrawn_at: null,
+  updated_at: 100,
+};
+
+const planRow = {
+  plan_id: "plan-1",
+  event_id: "event-1",
+  generation: 2,
+  status: "published",
+  algorithm_version: "planner-v1",
+  min_table_size: 4,
+  preferred_table_size: 6,
+  max_table_size: 6,
+  player_count: 1,
+  gm_signup_count: 1,
+  selected_gm_count: 1,
+  waitlist_count: 0,
+  created_by_user_id: "admin-1",
+  created_at: 100,
+  published_at: 150,
+};
+
+const tableRow = {
+  table_id: "table-1",
+  plan_id: "plan-1",
+  table_number: 1,
+  title: "Table 1",
+  capacity: 6,
+  gm_user_id: "gm-1",
+  gm_display_name: "GM One",
+  channel_id: null,
+  message_id: null,
+  created_at: 100,
+};
+
+const assignmentRow = {
+  assignment_id: "assignment-1",
+  plan_id: "plan-1",
+  table_id: "table-1",
+  desired_table_id: "table-1",
+  user_id: "player-1",
+  display_name: "Player One",
+  status: "assigned",
+  waitlist_position: null,
+  assigned_at: 150,
+  updated_at: 150,
 };
 
 function operationRow(
@@ -153,6 +224,7 @@ const configRow = {
   table_max_size: 6,
   scheduling_enabled: 1,
   role_sync_enabled: 1,
+  auto_publish_enabled: 1,
   created_at: 100,
   updated_at: 200,
 };
@@ -162,6 +234,10 @@ describe("D1 persistence model", () => {
     const migration = readFileSync("migrations/0001_initial.sql", "utf8");
     const gmSelectionMigration = readFileSync(
       "migrations/0002_gm_selection_current.sql",
+      "utf8",
+    );
+    const autopilotMigration = readFileSync(
+      "migrations/0003_autopilot_and_final_manifest.sql",
       "utf8",
     );
 
@@ -174,6 +250,10 @@ describe("D1 persistence model", () => {
     expect(migration).toContain("WHERE released_at IS NULL");
     expect(gmSelectionMigration).toContain("ADD COLUMN is_current");
     expect(gmSelectionMigration).toContain("gm_selections_current_priority_idx");
+    expect(autopilotMigration).toContain("auto_publish_enabled INTEGER NOT NULL DEFAULT 0");
+    expect(autopilotMigration).toContain("table_selection_closes_at");
+    expect(autopilotMigration).toContain("final_manifest_message_id");
+    expect(autopilotMigration).toContain("weekly_events_scheduler_deadlines_idx");
   });
 
   it("writes large draft plans in a bounded number of D1 statements", async () => {
@@ -261,15 +341,325 @@ describe("D1 persistence model", () => {
       preferredPlayersPerTable: 6,
       maxPlayersPerTable: 6,
       schedulingEnabled: true,
+      autoPublishEnabled: true,
     });
 
     expect(saved.announcementChannelId).toBe("channel-1");
     expect(saved.weeklyWeekday).toBe(7);
     expect(saved.preferredPlayersPerTable).toBe(6);
     expect(saved.schedulingEnabled).toBe(true);
+    expect(saved.autoPublishEnabled).toBe(true);
     expect(fake.statements[1]?.sql).not.toContain("guild-1");
     expect(fake.statements[1]?.values).toContain("channel-1");
     expect(fake.statements[1]?.values).toContain(7);
+  });
+
+  it("explicitly clears configured roles without treating omitted roles as null", async () => {
+    const fake = new FakeDatabase();
+    fake.batchResults.push([result(1), result(1)]);
+    fake.firstResults.push({
+      ...configRow,
+      admin_role_id: null,
+      gm_role_id: null,
+      reminder_role_id: null,
+    });
+    const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
+
+    const saved = await repository.saveGuildConfig({
+      guildId: "guild-1",
+      adminRoleId: null,
+      gmRoleId: null,
+      reminderRoleId: null,
+    });
+
+    expect(saved.adminRoleId).toBeNull();
+    expect(saved.gmRoleId).toBeNull();
+    expect(saved.reminderRoleId).toBeNull();
+    expect(fake.statements[1]?.sql).toContain(
+      "admin_role_id = CASE WHEN ? = 1 THEN ? ELSE admin_role_id END",
+    );
+    expect(fake.statements[1]?.values.slice(3, 9)).toEqual([
+      1, null, 1, null, 1, null,
+    ]);
+  });
+
+  it("defaults table selection close to event start and maps final manifest fields", async () => {
+    const fake = new FakeDatabase();
+    fake.firstResults.push(eventRow);
+    const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
+
+    const created = await repository.createWeeklyEvent({
+      eventId: "event-1",
+      guildId: "guild-1",
+      title: "Weekly Games",
+      startsAt: 1_000,
+      endsAt: 2_000,
+      signupOpensAt: 100,
+      signupLocksAt: 900,
+    });
+
+    expect(created.tableSelectionClosesAt).toBe(1_000);
+    expect(created.finalManifestMessageId).toBeNull();
+    expect(fake.statements[0]?.sql).toContain("table_selection_closes_at");
+    expect(fake.statements[0]?.values[7]).toBe(1_000);
+  });
+
+  it("gets the tenant-scoped latest weekly event", async () => {
+    const fake = new FakeDatabase();
+    fake.firstResults.push(eventRow);
+    const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
+
+    await expect(repository.getLatestWeeklyEvent("guild-1")).resolves.toMatchObject({
+      eventId: "event-1",
+      guildId: "guild-1",
+    });
+    expect(fake.statements[0]?.sql).toContain("WHERE guild_id = ?");
+    expect(fake.statements[0]?.sql).toContain("ORDER BY starts_at DESC");
+    expect(fake.statements[0]?.values).toEqual(["guild-1"]);
+  });
+
+  it("lists active and withdrawn signups for a complete export", async () => {
+    const fake = new FakeDatabase();
+    fake.allResults.push([
+      {
+        event_id: "event-1",
+        user_id: "player-1",
+        display_name: "Player One",
+        signup_kind: "player",
+        status: "active",
+        source: "native",
+        source_external_id: null,
+        signed_up_at: 100,
+        withdrawn_at: null,
+        updated_at: 100,
+      },
+      {
+        event_id: "event-1",
+        user_id: "player-2",
+        display_name: "Player Two",
+        signup_kind: "player",
+        status: "withdrawn",
+        source: "native",
+        source_external_id: null,
+        signed_up_at: 101,
+        withdrawn_at: 150,
+        updated_at: 150,
+      },
+    ]);
+    const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
+
+    await expect(repository.listAllSignups("event-1")).resolves.toEqual([
+      expect.objectContaining({ userId: "player-1", status: "active" }),
+      expect.objectContaining({ userId: "player-2", status: "withdrawn" }),
+    ]);
+    expect(fake.statements[0]?.sql).not.toContain(
+      "WHERE event_id = ? AND status = 'active'",
+    );
+    expect(fake.statements[0]?.values).toEqual(["event-1"]);
+  });
+
+  it("reads a bounded tenant-scoped weekly export in one D1 batch", async () => {
+    const fake = new FakeDatabase();
+    fake.batchResults.push([
+      rowsResult([eventRow]),
+      rowsResult([signupRow]),
+      rowsResult([planRow]),
+      rowsResult([tableRow]),
+      rowsResult([assignmentRow]),
+    ]);
+    const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
+
+    const snapshot = await repository.getWeeklyExportSnapshot("guild-1", "event-1");
+
+    expect(snapshot).toMatchObject({
+      event: { eventId: "event-1", guildId: "guild-1" },
+      signups: [{ userId: "player-1" }],
+      planBundle: {
+        plan: { planId: "plan-1", generation: 2, status: "published" },
+        tables: [{ tableId: "table-1" }],
+        assignments: [{ assignmentId: "assignment-1" }],
+      },
+    });
+    expect(fake.batches).toHaveLength(1);
+    expect(fake.batches[0]).toHaveLength(5);
+    expect(fake.batches[0]?.every((statement) => statement.sql.includes("selected_event"))).toBe(true);
+    expect(fake.batches[0]?.[0]?.sql).toContain("event_id = ?1 AND guild_id = ?2");
+    expect(fake.batches[0]?.[0]?.values).toEqual(["event-1", "guild-1"]);
+    expect(fake.batches[0]?.[1]?.values).toEqual([
+      "event-1",
+      "guild-1",
+      WEEKLY_ROSTER_MAX_ROWS + 1,
+    ]);
+    expect(fake.batches[0]?.[2]?.sql).toContain(
+      "CASE plans.status WHEN 'published' THEN 0 ELSE 1 END",
+    );
+    expect(fake.batches[0]?.[3]?.values).toEqual([
+      "event-1",
+      "guild-1",
+      WEEKLY_ROSTER_MAX_TABLES + 1,
+    ]);
+    expect(fake.batches[0]?.[4]?.values).toEqual([
+      "event-1",
+      "guild-1",
+      WEEKLY_ROSTER_MAX_ASSIGNMENTS + 1,
+    ]);
+  });
+
+  it("uses current-then-latest event selection for a default export", async () => {
+    const fake = new FakeDatabase();
+    fake.batchResults.push([
+      rowsResult([]),
+      rowsResult([]),
+      rowsResult([]),
+      rowsResult([]),
+      rowsResult([]),
+    ]);
+    const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
+
+    await expect(repository.getWeeklyExportSnapshot("guild-1")).resolves.toBeNull();
+    expect(fake.batches[0]?.[0]?.values).toEqual(["guild-1", 200]);
+    expect(fake.batches[0]?.[0]?.sql).toContain(
+      "status NOT IN ('archived', 'cancelled')",
+    );
+    expect(fake.batches[0]?.[0]?.sql).toContain(
+      "WHEN status IN ('archived', 'cancelled') THEN starts_at",
+    );
+  });
+
+  it("rejects over-limit snapshot collections before returning partial data", async () => {
+    const cases = [
+      {
+        limit: "rows",
+        maximum: WEEKLY_ROSTER_MAX_ROWS,
+        resultIndex: 1,
+        rows: Array.from({ length: WEEKLY_ROSTER_MAX_ROWS + 1 }, (_, index) => ({
+          ...signupRow,
+          user_id: `player-${index}`,
+        })),
+      },
+      {
+        limit: "assignments",
+        maximum: WEEKLY_ROSTER_MAX_ASSIGNMENTS,
+        resultIndex: 4,
+        rows: Array.from(
+          { length: WEEKLY_ROSTER_MAX_ASSIGNMENTS + 1 },
+          (_, index) => ({
+            ...assignmentRow,
+            assignment_id: `assignment-${index}`,
+            user_id: `player-${index}`,
+          }),
+        ),
+      },
+      {
+        limit: "tables",
+        maximum: WEEKLY_ROSTER_MAX_TABLES,
+        resultIndex: 3,
+        rows: Array.from({ length: WEEKLY_ROSTER_MAX_TABLES + 1 }, (_, index) => ({
+          ...tableRow,
+          table_id: `table-${index}`,
+          table_number: index + 1,
+          gm_user_id: `gm-${index}`,
+        })),
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const fake = new FakeDatabase();
+      const batchRows: unknown[][] = [
+        [eventRow],
+        [signupRow],
+        [planRow],
+        [tableRow],
+        [assignmentRow],
+      ];
+      batchRows[testCase.resultIndex] = [...testCase.rows];
+      fake.batchResults.push(batchRows.map((rows) => rowsResult(rows)));
+      const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
+
+      await expect(
+        repository.getWeeklyExportSnapshot("guild-1", "event-1"),
+      ).rejects.toEqual(
+        expect.objectContaining<Partial<WeeklyExportLimitError>>({
+          name: "WeeklyExportLimitError",
+          limit: testCase.limit,
+          maximum: testCase.maximum,
+          actual: testCase.maximum + 1,
+        }),
+      );
+    }
+  });
+
+  it("persists the final manifest projection idempotently", async () => {
+    const fake = new FakeDatabase();
+    fake.runResults.push(result(1));
+    const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
+
+    await expect(
+      repository.setFinalManifest(
+        "event-1",
+        "channel-final",
+        "message-final",
+        "plan-1",
+        7,
+        190,
+      ),
+    ).resolves.toBe(true);
+    expect(fake.statements[0]?.sql).toContain("final_manifest_channel_id = ?");
+    expect(fake.statements[0]?.sql).toContain("final_manifest_message_id IS NULL");
+    expect(fake.statements[0]?.sql).toContain("table_state_version = ?");
+    expect(fake.statements[0]?.sql).toContain("plans.status = 'published'");
+    expect(fake.statements[0]?.values).toEqual([
+      "channel-final",
+      "message-final",
+      "plan-1",
+      7,
+      190,
+      200,
+      "event-1",
+      7,
+      "plan-1",
+      "channel-final",
+      "message-final",
+    ]);
+  });
+
+  it("inserts a late player once and revives a withdrawn assignment", async () => {
+    const fake = new FakeDatabase();
+    fake.batchResults.push([result(0), result(1)]);
+    fake.firstResults.push({
+      assignment_id: "assignment-1",
+      plan_id: "plan-1",
+      table_id: null,
+      desired_table_id: null,
+      user_id: "player-1",
+      display_name: "Player One",
+      status: "unassigned",
+      waitlist_position: null,
+      assigned_at: null,
+      updated_at: 200,
+    });
+    const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
+
+    await expect(repository.ensureUnassignedAssignment({
+      assignmentId: "assignment-1",
+      planId: "plan-1",
+      userId: "player-1",
+      displayName: "Player One",
+    })).resolves.toMatchObject({ status: "unassigned", tableId: null });
+
+    expect(fake.batches[0]).toHaveLength(3);
+    expect(fake.batches[0]?.[0]?.sql).toContain("INSERT OR IGNORE INTO assignments");
+    expect(fake.batches[0]?.[0]?.sql).toContain("plan.status = 'published'");
+    expect(fake.batches[0]?.[1]?.sql).toContain(
+      "status = CASE WHEN status = 'withdrawn' THEN 'unassigned' ELSE status END",
+    );
+    expect(fake.batches[0]?.[1]?.sql).toContain(
+      "desired_table_id = CASE WHEN status = 'withdrawn' THEN NULL",
+    );
+    expect(fake.batches[0]?.[2]?.sql).toContain(
+      "table_state_version = table_state_version + 1",
+    );
+    expect(fake.batches[0]?.[1]?.sql).toContain("signup.status = 'active'");
   });
 
   it("returns a table-specific waitlist result from an atomic join batch", async () => {
@@ -303,8 +693,39 @@ describe("D1 persistence model", () => {
     expect(joined.position).toBe(2);
     const update = fake.statements.find((statement) => statement.sql.includes("WITH target AS"));
     expect(update?.sql).toContain("p.status = 'published'");
+    expect(update?.sql).toContain("weekly.status = 'published'");
+    expect(update?.sql).toContain("strftime('%s', 'now')");
     expect(update?.sql).toContain("queued.desired_table_id = ?");
     expect(update?.values).toContain("table-1");
+    expect(fake.batches[0]?.[1]?.sql).toContain(
+      "table_state_version = table_state_version + 1",
+    );
+  });
+
+  it("rejects an assignment mutation when its atomic deadline guard loses the race", async () => {
+    const fake = new FakeDatabase();
+    fake.firstResults.push({
+      assignment_id: "assignment-1",
+      plan_id: "plan-1",
+      table_id: null,
+      desired_table_id: "table-1",
+      user_id: "user-1",
+      display_name: "Player One",
+      status: "waitlisted",
+      waitlist_position: 1,
+      assigned_at: null,
+      updated_at: 100,
+    });
+    fake.batchResults.push([result(0), result(0), result(0)]);
+    const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
+
+    await expect(
+      repository.leaveTableAndPromote("plan-1", "user-1"),
+    ).rejects.toBeInstanceOf(TableSelectionUnavailableError);
+    expect(fake.batches[0]?.[0]?.sql).toContain("strftime('%s', 'now')");
+    expect(fake.batches[0]?.[1]?.sql).toContain(
+      "table_state_version = table_state_version + 1",
+    );
   });
 
   it("retries failed or lease-expired operations", async () => {
@@ -362,7 +783,10 @@ describe("D1 persistence model", () => {
     due.allResults.push([]);
     const dueRepository = new GuildRepository(due as unknown as D1Database, () => 1_000);
     await dueRepository.listDueRemindersWithLease(1_000, 25, 100);
-    expect(due.statements[0]?.sql).toContain("status = 'sending' AND updated_at <= ?");
+    expect(due.statements[0]?.sql).toContain("config.scheduling_enabled = 1");
+    expect(due.statements[0]?.sql).toContain(
+      "deliveries.status = 'sending' AND deliveries.updated_at <= ?",
+    );
     expect(due.statements[0]?.values).toEqual([1_000, 1_000, 900, 25]);
 
     const claim = new FakeDatabase();
@@ -447,7 +871,7 @@ describe("D1 persistence model", () => {
     expect(fake.statements[0]?.sql).toContain("status = 'archived'");
     expect(fake.statements[0]?.sql).toContain("role_leases.event_id = weekly_events.event_id");
     expect(fake.statements[0]?.sql).toContain("role_leases.released_at IS NULL");
-    expect(fake.statements[0]?.values).toEqual([300, 300, 300]);
+    expect(fake.statements[0]?.values).toEqual([300, 300, 300, 300]);
   });
 
   it("publishes only the final GM set as current priority history", async () => {
@@ -466,6 +890,10 @@ describe("D1 persistence model", () => {
     expect(fake.batches[0]?.[3]?.sql).toContain("target.status = 'published'");
     expect(fake.batches[0]?.[4]?.sql).toContain("ON CONFLICT(event_id, gm_user_id) DO UPDATE");
     expect(fake.batches[0]?.[4]?.sql).toContain("is_current = 1");
+    expect(fake.batches[0]?.[2]?.sql).toContain(
+      "table_state_version = table_state_version + 1",
+    );
+    expect(fake.batches[0]?.[2]?.sql).toContain("changes() = 1");
 
     const stats = new FakeDatabase();
     stats.allResults.push([]);

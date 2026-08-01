@@ -1,6 +1,9 @@
 const DISCORD_API_BASE_URL = "https://discord.com/api/v10";
 const MAX_ERROR_BODY_LENGTH = 16_384;
 const MAX_ROLE_MENTIONS = 100;
+const MAX_ATTACHMENT_BYTES = 512 * 1024;
+const MAX_ATTACHMENT_FILENAME_LENGTH = 255;
+const MAX_FINAL_MANIFEST_EMBED_CHARACTERS = 5_800;
 
 export type Snowflake = string;
 export type DiscordDate = Date | string | number;
@@ -105,6 +108,12 @@ export interface DiscordMessagePayload {
   flags?: number;
   nonce?: string;
   enforce_nonce?: boolean;
+}
+
+export interface DiscordFileAttachment {
+  filename: string;
+  content: string | Uint8Array | ArrayBuffer;
+  contentType?: string;
 }
 
 export interface DiscordMessage {
@@ -226,6 +235,41 @@ function safePayload(payload: DiscordMessagePayload): DiscordMessagePayload {
   };
 }
 
+function prepareFileAttachment(file: DiscordFileAttachment): {
+  filename: string;
+  contentType: string;
+  bytes: Uint8Array;
+} {
+  const filename = file.filename.trim();
+  if (!filename) {
+    throw new TypeError("Attachment filename is required");
+  }
+  if (filename.length > MAX_ATTACHMENT_FILENAME_LENGTH) {
+    throw new RangeError(
+      `Attachment filename cannot exceed ${MAX_ATTACHMENT_FILENAME_LENGTH} characters`,
+    );
+  }
+  if (filename === "." || filename === ".." || /[\u0000-\u001f\u007f/\\]/.test(filename)) {
+    throw new TypeError("Attachment filename cannot contain path separators or control characters");
+  }
+
+  const contentType = file.contentType?.trim() || "application/octet-stream";
+  if (contentType.length > 255 || /[\u0000-\u001f\u007f]/.test(contentType)) {
+    throw new TypeError("Attachment content type is invalid");
+  }
+
+  const bytes =
+    typeof file.content === "string"
+      ? new TextEncoder().encode(file.content)
+      : file.content instanceof Uint8Array
+        ? file.content
+        : new Uint8Array(file.content);
+  if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+    throw new RangeError(`Attachment content cannot exceed ${MAX_ATTACHMENT_BYTES} bytes`);
+  }
+  return { filename, contentType, bytes };
+}
+
 async function responseBody(response: Response, limitErrors: boolean): Promise<unknown> {
   if (response.status === 204 || response.status === 205) {
     return undefined;
@@ -265,12 +309,13 @@ export class DiscordRestClient {
     auditLogReason?: string,
     displayPath = path,
     additionalSecret = "",
+    bodyFactory?: () => BodyInit,
   ): Promise<T> {
     const headers = new Headers({
       accept: "application/json",
       authorization: `Bot ${this.#botToken}`,
     });
-    if (body !== undefined) {
+    if (body !== undefined && !bodyFactory) {
       headers.set("content-type", "application/json");
     }
     if (auditLogReason?.trim()) {
@@ -284,7 +329,7 @@ export class DiscordRestClient {
         response = await this.#fetch(`${this.#apiBaseUrl}${path}`, {
           method,
           headers,
-          body: requestBody,
+          body: bodyFactory ? bodyFactory() : requestBody,
         });
       } catch (cause) {
         const safeCause = sanitizeForError(
@@ -403,6 +448,45 @@ export class DiscordRestClient {
       undefined,
       "/webhooks/" + applicationId + "/[interaction-token]/messages/@original",
       interactionToken,
+    );
+  }
+
+  editOriginalInteractionResponseWithFile(
+    applicationId: Snowflake,
+    interactionToken: string,
+    payload: DiscordMessagePayload,
+    file: DiscordFileAttachment,
+  ): Promise<DiscordMessage> {
+    requireSnowflake(applicationId, "applicationId");
+    if (!interactionToken.trim()) throw new TypeError("interactionToken is required");
+    const attachment = prepareFileAttachment(file);
+    const safeMessage = {
+      ...safePayload(payload),
+      attachments: [{ id: 0, filename: attachment.filename }],
+    };
+    const path =
+      "/webhooks/" +
+      applicationId +
+      "/" +
+      encodeURIComponent(interactionToken) +
+      "/messages/@original";
+    return this.#request(
+      "PATCH",
+      path,
+      undefined,
+      undefined,
+      "/webhooks/" + applicationId + "/[interaction-token]/messages/@original",
+      interactionToken,
+      () => {
+        const form = new FormData();
+        form.append("payload_json", JSON.stringify(safeMessage));
+        form.append(
+          "files[0]",
+          new Blob([attachment.bytes], { type: attachment.contentType }),
+          attachment.filename,
+        );
+        return form;
+      },
     );
   }
 
@@ -660,6 +744,117 @@ export function renderPlanPreview(input: PlanPreviewInput): DiscordMessagePayloa
         footer: { text: `Draft ${input.planId} • Nothing has been published yet.` },
       },
     ],
+    allowed_mentions: safeAllowedMentions(),
+  };
+}
+
+function manifestTableField(
+  table: {
+    label?: string;
+    gmName: string;
+    capacity: number;
+    players: readonly string[];
+    waitlist?: readonly string[];
+  },
+  index: number,
+): DiscordEmbedField {
+  const sections = [
+    `**Seats:** ${table.players.length}/${table.capacity}`,
+    `**Players (${table.players.length})**\n${displayList(table.players, "No players assigned")}`,
+  ];
+  if (table.waitlist?.length) {
+    sections.push(
+      `**Waitlist (${table.waitlist.length})**\n${displayList(table.waitlist)}`,
+    );
+  }
+  return {
+    name: truncate(
+      `${escapeMarkdown(table.label ?? `Table ${index + 1}`)} — ${escapeMarkdown(table.gmName)}`,
+      256,
+    ),
+    value: truncate(sections.join("\n\n"), 1024),
+  };
+}
+
+export function renderFinalManifest(input: {
+  planId: string;
+  generation: number;
+  eventTitle: string;
+  startsAt: DiscordDate;
+  tables: readonly {
+    id: string;
+    label?: string;
+    gmName: string;
+    capacity: number;
+    players: readonly string[];
+    waitlist?: readonly string[];
+  }[];
+  unassigned: readonly string[];
+}): DiscordMessagePayload {
+  const title = truncate(`📜 Final manifest — ${escapeMarkdown(input.eventTitle)}`, 256);
+  const description = truncate(
+    [
+      `**When:** ${discordTimestamp(input.startsAt)} (${discordTimestamp(input.startsAt, "R")})`,
+      `**Plan revision:** ${input.generation}`,
+      `**Tables:** ${input.tables.length}`,
+      "**Status:** Final — table selection is closed.",
+    ].join("\n"),
+    4096,
+  );
+  const footerText = truncate(`Plan ${input.planId} • Final manifest`, 2048);
+  const overflowFieldName = "Unassigned / overflow";
+  const fields: DiscordEmbedField[] = [];
+  let embedCharacters = title.length + description.length + footerText.length;
+
+  for (const [index, table] of input.tables.slice(0, 23).entries()) {
+    const field = manifestTableField(table, index);
+    const fieldCharacters = field.name.length + field.value.length;
+    const needsOverflowAfter = input.unassigned.length > 0 || index + 1 < input.tables.length;
+    const overflowReserve = needsOverflowAfter ? overflowFieldName.length + 512 : 0;
+    if (
+      embedCharacters + fieldCharacters + overflowReserve >
+      MAX_FINAL_MANIFEST_EMBED_CHARACTERS
+    ) {
+      break;
+    }
+    fields.push(field);
+    embedCharacters += fieldCharacters;
+  }
+
+  const omittedTables = input.tables.length - fields.length;
+  if (input.unassigned.length || omittedTables > 0) {
+    const details = [
+      input.unassigned.length
+        ? `**Unassigned players (${input.unassigned.length})**\n${displayList(input.unassigned)}`
+        : undefined,
+      omittedTables > 0
+        ? `**Additional tables:** ${omittedTables} omitted from this Discord summary.`
+        : undefined,
+    ].filter((value): value is string => Boolean(value));
+    const remainingValueCharacters = Math.min(
+      1024,
+      Math.max(
+        1,
+        MAX_FINAL_MANIFEST_EMBED_CHARACTERS - embedCharacters - overflowFieldName.length,
+      ),
+    );
+    fields.push({
+      name: overflowFieldName,
+      value: truncate(details.join("\n\n"), remainingValueCharacters),
+    });
+  }
+
+  return {
+    embeds: [
+      {
+        title,
+        description,
+        color: 0x5865f2,
+        fields,
+        footer: { text: footerText },
+      },
+    ],
+    components: [],
     allowed_mentions: safeAllowedMentions(),
   };
 }

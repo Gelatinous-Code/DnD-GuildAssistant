@@ -3,6 +3,7 @@ import {
   DiscordApiError,
   discordNonce,
   type DiscordMessagePayload,
+  type DiscordRole,
 } from "../src/discord-api";
 import {
   ReminderConfigurationError,
@@ -27,6 +28,18 @@ const CHANNEL_ID = "200";
 const ROLE_ID = "300";
 const ADMIN_ROLE_ID = "301";
 
+function discordRole(id: string, mentionable = true): DiscordRole {
+  return {
+    id,
+    name: `Role ${id}`,
+    color: 0,
+    position: 1,
+    permissions: "0",
+    managed: false,
+    mentionable,
+  };
+}
+
 function event(overrides: Partial<WeeklyEvent> = {}): WeeklyEvent {
   return {
     eventId: "event-1",
@@ -36,6 +49,7 @@ function event(overrides: Partial<WeeklyEvent> = {}): WeeklyEvent {
     endsAt: NOW + 28 * 60 * 60_000,
     signupOpensAt: NOW - 7 * 24 * 60 * 60_000,
     signupLocksAt: NOW + 2 * 60 * 60_000,
+    tableSelectionClosesAt: NOW + 24 * 60 * 60_000,
     status: "open",
     source: "native",
     sourceExternalId: null,
@@ -43,6 +57,12 @@ function event(overrides: Partial<WeeklyEvent> = {}): WeeklyEvent {
     signupMessageId: "400",
     tableChannelId: CHANNEL_ID,
     tableMessageId: null,
+    finalManifestChannelId: null,
+    finalManifestMessageId: null,
+    tableStateVersion: 0,
+    finalizedPlanId: null,
+    finalizedTableStateVersion: null,
+    tablesFinalizedAt: null,
     createdByUserId: "500",
     createdAt: NOW - 1,
     updatedAt: NOW - 1,
@@ -72,6 +92,7 @@ function config(overrides: Partial<GuildConfig> = {}): GuildConfig {
     tableMaxSize: 6,
     schedulingEnabled: true,
     roleSyncEnabled: false,
+    autoPublishEnabled: false,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -164,16 +185,32 @@ function service(
   repo: ReminderRepository,
   sendChannelMessage = vi.fn().mockResolvedValue({ id: "message-1", channel_id: CHANNEL_ID }),
   logs: ReminderLogEntry[] = [],
-  options: { now?: () => number; uniqueId?: () => string; maxAttempts?: number } = {},
-): { instance: ReminderService; sendChannelMessage: ReturnType<typeof vi.fn> } {
+  options: {
+    now?: () => number;
+    uniqueId?: () => string;
+    maxAttempts?: number;
+    getGuildRoles?: (guildId: string) => Promise<DiscordRole[]>;
+  } = {},
+): {
+  instance: ReminderService;
+  sendChannelMessage: ReturnType<typeof vi.fn>;
+  getGuildRoles: (guildId: string) => Promise<DiscordRole[]>;
+} {
+  const getGuildRoles =
+    options.getGuildRoles ??
+    vi.fn(async (_guildId: string) => [
+      discordRole(ROLE_ID),
+      discordRole(ADMIN_ROLE_ID),
+    ]);
   return {
-    instance: new ReminderService(repo, { sendChannelMessage }, {
+    instance: new ReminderService(repo, { getGuildRoles, sendChannelMessage }, {
       now: options.now ?? (() => NOW),
       uniqueId: options.uniqueId ?? (() => "unique-1"),
       maxAttempts: options.maxAttempts,
       logger: (entry) => logs.push(entry),
     }),
     sendChannelMessage,
+    getGuildRoles,
   };
 }
 
@@ -307,7 +344,7 @@ describe("reminder delivery", () => {
       ),
       countActiveSignups: vi.fn().mockResolvedValue({ players: 13, gms: 2 }),
     });
-    const { instance, sendChannelMessage } = service(repo);
+    const { instance, sendChannelMessage, getGuildRoles } = service(repo);
 
     await expect(instance.deliverReminder(delivery())).resolves.toMatchObject({
       status: "sent",
@@ -323,6 +360,57 @@ describe("reminder delivery", () => {
     expect(payload.content).toContain(
       "Organizer escalation — Capacity risk: 13 players and 2 GMs; 1 player exceeds current maximum table capacity.",
     );
+    expect(getGuildRoles).toHaveBeenCalledWith(GUILD_ID);
+  });
+
+  it("fails clearly when the capacity-escalation role no longer exists", async () => {
+    const repo = repository({
+      getGuildConfig: vi.fn().mockResolvedValue(
+        config({ adminRoleId: ADMIN_ROLE_ID }),
+      ),
+      countActiveSignups: vi.fn().mockResolvedValue({ players: 13, gms: 2 }),
+    });
+    const getGuildRoles = vi.fn(async (_guildId: string) => [discordRole(ROLE_ID)]);
+    const { instance, sendChannelMessage } = service(repo, undefined, [], {
+      getGuildRoles,
+    });
+
+    await expect(instance.deliverReminder(delivery())).resolves.toMatchObject({
+      status: "failed",
+      permanent: true,
+      nextAttemptAt: null,
+      reason: expect.stringContaining("organizer escalation role no longer exists"),
+    });
+    expect(sendChannelMessage).not.toHaveBeenCalled();
+    expect(repo.markReminderFailed).toHaveBeenCalledWith(
+      "delivery-1",
+      expect.stringContaining("organizer escalation role no longer exists"),
+      null,
+    );
+  });
+
+  it("fails clearly when the capacity-escalation role cannot be mentioned", async () => {
+    const repo = repository({
+      getGuildConfig: vi.fn().mockResolvedValue(
+        config({ adminRoleId: ADMIN_ROLE_ID }),
+      ),
+      countActiveSignups: vi.fn().mockResolvedValue({ players: 13, gms: 2 }),
+    });
+    const getGuildRoles = vi.fn(async (_guildId: string) => [
+      discordRole(ROLE_ID),
+      discordRole(ADMIN_ROLE_ID, false),
+    ]);
+    const { instance, sendChannelMessage } = service(repo, undefined, [], {
+      getGuildRoles,
+    });
+
+    await expect(instance.deliverReminder(delivery())).resolves.toMatchObject({
+      status: "failed",
+      permanent: true,
+      nextAttemptAt: null,
+      reason: expect.stringContaining("organizer escalation role is not mentionable"),
+    });
+    expect(sendChannelMessage).not.toHaveBeenCalled();
   });
 
   it("does not ping the administrator role when current capacity is healthy", async () => {
@@ -332,7 +420,7 @@ describe("reminder delivery", () => {
       ),
       countActiveSignups: vi.fn().mockResolvedValue({ players: 9, gms: 2 }),
     });
-    const { instance, sendChannelMessage } = service(repo);
+    const { instance, sendChannelMessage, getGuildRoles } = service(repo);
 
     await expect(instance.deliverReminder(delivery())).resolves.toMatchObject({
       status: "sent",
@@ -345,6 +433,7 @@ describe("reminder delivery", () => {
     expect(payload.content).toContain(
       "Current signups: 9 players and 2 GMs; 3 maximum-capacity seats remain.",
     );
+    expect(getGuildRoles).not.toHaveBeenCalled();
   });
 
   it("does not double-send when another tick already claimed the occurrence", async () => {

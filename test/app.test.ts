@@ -56,4 +56,46 @@ describe("deferred Discord interactions", () => {
     });
     expect(JSON.parse(String(init.body))).not.toHaveProperty("flags");
   });
+
+  it("acknowledges a component immediately and sends validation feedback privately", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ id: "301", channel_id: "400", content: "done" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    let background: Promise<unknown> | undefined;
+    const context = {
+      waitUntil(promise: Promise<unknown>) {
+        background = promise;
+      },
+    } as ExecutionContext;
+
+    const response = await handleDiscordInteraction(
+      {
+        id: "501",
+        application_id: "1533171671886725293",
+        token: "interaction-token",
+        type: 3,
+        guild_id: "1533181439376494642",
+        member: { user: { id: "1533183019031199946" } },
+        data: { custom_id: "obsolete-control" },
+      },
+      env,
+      context,
+    );
+
+    expect(await response.json()).toEqual({ type: 6 });
+    expect(background).toBeDefined();
+    await background;
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://discord.com/api/v10/webhooks/1533171671886725293/interaction-token",
+    );
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      content: "⚠️ This control is no longer recognized.",
+      flags: 64,
+      allowed_mentions: { parse: [] },
+    });
+  });
 });
