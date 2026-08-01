@@ -19,8 +19,9 @@ Requirements: Node.js 22 or newer and npm.
     npm test
     npm run typecheck
 
-Only the command-registration script requires a bot token. Most Worker and test
-changes can be developed without one.
+Automated tests do not require a real bot token. Live command registration,
+Discord REST publication, reminder, and role flows do; keep the token only in
+local/Cloudflare secrets.
 
 ## Making a change
 
@@ -28,7 +29,7 @@ changes can be developed without one.
    <code>feat/table-signups</code> or <code>fix/invalid-signature-response</code>.
 2. Add or update tests for behavior changes.
 3. Keep changes small enough to review and avoid unrelated formatting churn.
-4. Run <code>npm test</code> and <code>npm run typecheck</code>.
+4. Run <code>npm run db:migrate:local</code> and <code>npm run check</code>.
 5. Update the README or changelog when behavior, setup, or user-facing features
    change.
 6. Open a pull request and complete the template.

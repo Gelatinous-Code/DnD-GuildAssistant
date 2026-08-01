@@ -1,0 +1,343 @@
+import { nextWeeklyOccurrence } from "./schedule";
+import { DEFAULT_OPERATION_LEASE_MS } from "./storage/repository";
+import type {
+  BeginOperationResult,
+  GuildConfig,
+  ReminderDelivery,
+  WeeklyEvent,
+  CreateWeeklyEventInput,
+} from "./storage/repository";
+
+export interface SchedulerRepository {
+  listSchedulingGuilds(): Promise<GuildConfig[]>;
+  findWeeklyEventByStart(guildId: string, startsAt: number): Promise<WeeklyEvent | null>;
+  createWeeklyEvent(input: CreateWeeklyEventInput): Promise<WeeklyEvent>;
+  listEventsForScheduler(through: number): Promise<WeeklyEvent[]>;
+  listDueReminders(now: number, limit?: number): Promise<ReminderDelivery[]>;
+  beginOperation(input: {
+    operationKey: string;
+    guildId: string;
+    eventId?: string;
+    operationKind: string;
+    request?: unknown;
+  }): Promise<BeginOperationResult>;
+  reclaimOperation(operationKey: string, staleBefore: number): Promise<boolean>;
+  finishOperation(
+    operationKey: string,
+    outcome:
+      | { status: "succeeded"; result?: unknown }
+      | { status: "failed"; error: string },
+  ): Promise<boolean>;
+}
+
+export interface SchedulerCallbacks {
+  openEvent(event: WeeklyEvent): Promise<void>;
+  lockAndPlanEvent(event: WeeklyEvent): Promise<void>;
+  archiveEvent(event: WeeklyEvent): Promise<void>;
+  enqueueEventReminders(event: WeeklyEvent): Promise<void>;
+  deliverReminder(delivery: ReminderDelivery): Promise<void>;
+}
+
+export interface ScheduledActionResult {
+  action: "create" | "open" | "lock-plan" | "archive" | "reminder";
+  entityId: string;
+  status: "succeeded" | "skipped" | "failed";
+  operationKey?: string;
+  detail?: string;
+}
+
+export interface SchedulerReport {
+  startedAt: number;
+  completedAt: number;
+  actions: ScheduledActionResult[];
+}
+
+function scheduledEventId(guildId: string, startsAt: number): string {
+  return "event-" + guildId + "-" + startsAt;
+}
+
+function eventTitle(startsAt: number, timeZone: string): string {
+  return (
+    "Weekly Games — " +
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(startsAt))
+  );
+}
+
+function eventInput(config: GuildConfig, now: number): CreateWeeklyEventInput {
+  const startsAt = Date.parse(
+    nextWeeklyOccurrence(
+      {
+        weekday: config.weeklyDay,
+        time: config.weeklyTime,
+        timeZone: config.timezone,
+      },
+      new Date(now).toISOString(),
+    ),
+  );
+  return {
+    eventId: scheduledEventId(config.guildId, startsAt),
+    guildId: config.guildId,
+    title: eventTitle(startsAt, config.timezone),
+    startsAt,
+    endsAt: startsAt + config.eventDurationMinutes * 60_000,
+    signupOpensAt: startsAt - config.signupOpenLeadDays * 86_400_000,
+    signupLocksAt: startsAt - config.signupLockLeadHours * 3_600_000,
+    reminderAt:
+      startsAt -
+      config.signupLockLeadHours * 3_600_000 -
+      48 * 3_600_000,
+    status: "draft",
+    source: "native",
+  };
+}
+
+async function captureUnpersisted(
+  actions: ScheduledActionResult[],
+  action: ScheduledActionResult["action"],
+  entityId: string,
+  work: () => Promise<void>,
+): Promise<void> {
+  try {
+    await work();
+    actions.push({ action, entityId, status: "succeeded" });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    actions.push({ action, entityId, status: "failed", detail: detail.slice(0, 500) });
+  }
+}
+
+export function schedulerOperationKey(
+  action: "create" | "open" | "lock-plan" | "archive",
+  entityId: string,
+): string {
+  return `scheduler:${action}:${entityId}`;
+}
+
+interface PersistedWorkResult {
+  status?: "succeeded" | "skipped";
+  detail?: string;
+  result?: unknown;
+}
+
+async function capturePersisted(
+  repository: SchedulerRepository,
+  actions: ScheduledActionResult[],
+  action: "create" | "open" | "lock-plan" | "archive",
+  entityId: string,
+  guildId: string,
+  eventId: string | undefined,
+  now: number,
+  work: () => Promise<PersistedWorkResult | void>,
+): Promise<void> {
+  const operationKey = schedulerOperationKey(action, entityId);
+  try {
+    const claim = await repository.beginOperation({
+      operationKey,
+      guildId,
+      eventId,
+      operationKind: `scheduler-${action}`,
+      request: { action, entityId },
+    });
+    let ownsClaim = claim.claimed;
+    if (
+      !ownsClaim &&
+      (claim.operation.status === "failed" ||
+        (claim.operation.status === "started" &&
+          claim.operation.updatedAt <= now - DEFAULT_OPERATION_LEASE_MS))
+    ) {
+      ownsClaim = await repository.reclaimOperation(
+        operationKey,
+        now - DEFAULT_OPERATION_LEASE_MS,
+      );
+    }
+    if (!ownsClaim) {
+      const detail =
+        claim.operation.status === "succeeded"
+          ? "The persisted scheduler operation already succeeded."
+          : "Another scheduler invocation owns this operation.";
+      actions.push({ action, entityId, operationKey, status: "skipped", detail });
+      return;
+    }
+
+    const outcome = (await work()) ?? {};
+    const completed = await repository.finishOperation(operationKey, {
+      status: "succeeded",
+      result: {
+        action,
+        entityId,
+        outcome: outcome.status ?? "succeeded",
+        detail: outcome.detail,
+        value: outcome.result,
+      },
+    });
+    if (!completed) {
+      throw new Error("Scheduler operation completion could not be persisted.");
+    }
+    actions.push({
+      action,
+      entityId,
+      operationKey,
+      status: outcome.status ?? "succeeded",
+      detail: outcome.detail,
+    });
+  } catch (error) {
+    const detail = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+    await repository.finishOperation(operationKey, { status: "failed", error: detail });
+    actions.push({ action, entityId, operationKey, status: "failed", detail });
+  }
+}
+
+/**
+ * Runs one bounded cron pass. All state-changing callbacks must use conditional
+ * writes/idempotency keys; this orchestrator intentionally tolerates duplicate
+ * and overlapping Cloudflare scheduled deliveries.
+ */
+export async function runScheduledTick(
+  repository: SchedulerRepository,
+  callbacks: SchedulerCallbacks,
+  now = Date.now(),
+): Promise<SchedulerReport> {
+  const actions: ScheduledActionResult[] = [];
+  const configs = await repository.listSchedulingGuilds();
+
+  for (const config of configs) {
+    if (!config.schedulingEnabled || !config.eventChannelId) continue;
+    const input = eventInput(config, now);
+    let event: WeeklyEvent | null = null;
+    await capturePersisted(
+      repository,
+      actions,
+      "create",
+      input.eventId,
+      config.guildId,
+      undefined,
+      now,
+      async () => {
+        event = await repository.findWeeklyEventByStart(config.guildId, input.startsAt);
+        if (event) {
+          return {
+            status: "skipped",
+            detail: "The scheduled event already exists.",
+            result: { created: false, eventId: event.eventId },
+          };
+        }
+        event = await repository.createWeeklyEvent(input);
+        return { result: { created: true, eventId: event.eventId } };
+      },
+    );
+    event ??= await repository.findWeeklyEventByStart(config.guildId, input.startsAt);
+    if (event) {
+      await captureUnpersisted(actions, "reminder", event.eventId, () =>
+        callbacks.enqueueEventReminders(event!),
+      );
+    }
+  }
+
+  const dueEvents = await repository.listEventsForScheduler(now);
+  for (const event of dueEvents) {
+    if (event.status === "draft" && event.signupOpensAt <= now) {
+      await capturePersisted(
+        repository,
+        actions,
+        "open",
+        event.eventId,
+        event.guildId,
+        event.eventId,
+        now,
+        async () => {
+          await callbacks.openEvent(event);
+        },
+      );
+      continue;
+    }
+    // Opening is a multi-step operation: the event transition can commit before
+    // Discord accepts (and we persist) the signup post. Reconcile that missing
+    // side effect before allowing the same event to advance to its lock step.
+    if (event.status === "open" && !event.signupMessageId) {
+      await capturePersisted(
+        repository,
+        actions,
+        "open",
+        event.eventId,
+        event.guildId,
+        event.eventId,
+        now,
+        async () => {
+          await callbacks.openEvent(event);
+        },
+      );
+      continue;
+    }
+    if (event.status === "open" && event.signupLocksAt <= now) {
+      await capturePersisted(
+        repository,
+        actions,
+        "lock-plan",
+        event.eventId,
+        event.guildId,
+        event.eventId,
+        now,
+        async () => {
+          await callbacks.lockAndPlanEvent(event);
+        },
+      );
+      continue;
+    }
+    // A crash after the open -> locked transition must resume plan generation
+    // with the same persisted operation rather than strand the event forever.
+    if (event.status === "locked") {
+      await capturePersisted(
+        repository,
+        actions,
+        "lock-plan",
+        event.eventId,
+        event.guildId,
+        event.eventId,
+        now,
+        async () => {
+          await callbacks.lockAndPlanEvent(event);
+        },
+      );
+      continue;
+    }
+    if (
+      ((event.status === "planned" || event.status === "published") &&
+        event.endsAt !== null &&
+        event.endsAt <= now) ||
+      event.status === "archived"
+    ) {
+      await capturePersisted(
+        repository,
+        actions,
+        "archive",
+        event.eventId,
+        event.guildId,
+        event.eventId,
+        now,
+        async () => {
+          await callbacks.archiveEvent(event);
+        },
+      );
+    }
+  }
+
+  const reminders = await repository.listDueReminders(now, 25);
+  for (const reminder of reminders) {
+    await captureUnpersisted(actions, "reminder", reminder.deliveryId, () =>
+      callbacks.deliverReminder(reminder),
+    );
+  }
+
+  const report = {
+    startedAt: now,
+    completedAt: Date.now(),
+    actions,
+  };
+  console.log(JSON.stringify({ kind: "guild-assistant.scheduler", ...report }));
+  return report;
+}

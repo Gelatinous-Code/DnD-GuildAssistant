@@ -24,6 +24,10 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Apply migrations to fresh local D1
+        run: npm run db:migrate:local
+      - name: Reapply migrations (idempotency)
+        run: npm run db:migrate:local
       - name: Run tests
         run: npm test
       - name: Run type checks

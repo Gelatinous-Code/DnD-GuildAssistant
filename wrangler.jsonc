@@ -9,8 +9,19 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dnd-guild-assistant",
+      "database_id": "572bf81d-79d4-4b81-ad12-397adec27f73",
+      "migrations_dir": "migrations"
+    }
+  ],
   "secrets": {
-    "required": ["DISCORD_PUBLIC_KEY"]
+    "required": ["DISCORD_PUBLIC_KEY", "DISCORD_BOT_TOKEN"]
   },
   "vars": {
     "DISCORD_APPLICATION_ID": "1533171671886725293",

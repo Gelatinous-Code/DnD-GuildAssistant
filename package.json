@@ -8,13 +8,17 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "commands:register": "node --env-file-if-exists=.dev.vars scripts/register-commands.mjs",
+    "db:migrate:local": "wrangler d1 migrations apply dnd-guild-assistant --local",
+    "db:migrate:remote": "wrangler d1 migrations apply dnd-guild-assistant --remote",
     "test": "vitest run",
     "test:watch": "vitest",
     "types": "wrangler types",
     "types:check": "wrangler types --check",
-    "typecheck": "npm run types:check && tsc --noEmit"
+    "typecheck": "npm run types:check && tsc --noEmit",
+    "check": "npm run typecheck && npm test"
   },
   "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1",
     "discord-interactions": "4.4.0"
   },
   "devDependencies": {
