@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dnd-new-dawn-guild-assistant",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "secrets": {
+    "required": ["DISCORD_PUBLIC_KEY"]
+  },
+  "vars": {
+    "DISCORD_APPLICATION_ID": "1533171671886725293",
+    "DISCORD_TEST_GUILD_ID": "1533181439376494642"
+  }
+}

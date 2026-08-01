@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose an improvement to the guild assistant or its development workflow.
+title: "[Feature]: "
+labels:
+  - enhancement
+  - needs-triage
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find the same request.
+          required: true
+        - label: This request does not include private guild or member data.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: Explain the user need. Focus on the outcome rather than only a proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe how the feature should work, including relevant Discord commands or responses.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy, permissions, and data retention
+      description: Note any Discord permissions, stored data, member visibility, or retention concerns.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context

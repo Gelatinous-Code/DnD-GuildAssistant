@@ -1,0 +1,30 @@
+{
+  "topics": [
+    "cloudflare-workers",
+    "discord-bot",
+    "dungeons-and-dragons",
+    "serverless",
+    "typescript",
+    "vitest"
+  ],
+  "labels": [
+    { "name": "needs-triage", "color": "D4C5F9", "description": "Needs initial maintainer review" },
+    { "name": "bug", "color": "D73A4A", "description": "Something is not working" },
+    { "name": "enhancement", "color": "A2EEEF", "description": "New feature or improvement" },
+    { "name": "documentation", "color": "0075CA", "description": "Documentation improvements" },
+    { "name": "security", "color": "B60205", "description": "Security-related work; sensitive reports stay private" },
+    { "name": "dependencies", "color": "0366D6", "description": "Dependency updates" },
+    { "name": "good first issue", "color": "7057FF", "description": "Approachable for a first contribution" },
+    { "name": "help wanted", "color": "008672", "description": "Maintainers welcome community help" },
+    { "name": "blocked", "color": "BFD4F2", "description": "Cannot proceed until a dependency is resolved" },
+    { "name": "priority: high", "color": "D93F0B", "description": "High-priority work" },
+    { "name": "area: discord", "color": "5865F2", "description": "Discord API and interaction behavior" },
+    { "name": "area: worker", "color": "F9D0C4", "description": "Cloudflare Worker runtime and deployment" },
+    { "name": "area: tests", "color": "C5DEF5", "description": "Test suite and test infrastructure" },
+    { "name": "release: breaking", "color": "B60205", "description": "Breaking release-note category" },
+    { "name": "release: feature", "color": "0E8A16", "description": "Feature release-note category" },
+    { "name": "release: fix", "color": "1D76DB", "description": "Fix release-note category" },
+    { "name": "release: maintenance", "color": "5319E7", "description": "Maintenance release-note category" },
+    { "name": "skip-changelog", "color": "EDEDED", "description": "Exclude from generated release notes" }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "name": "dnd-new-dawn-guild-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Discord guild assistant for organizing weekly tabletop games.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "commands:register": "node --env-file-if-exists=.dev.vars scripts/register-commands.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "types": "wrangler types",
+    "types:check": "wrangler types --check",
+    "typecheck": "npm run types:check && tsc --noEmit"
+  },
+  "dependencies": {
+    "discord-interactions": "4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10",
+    "wrangler": "4.118.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
