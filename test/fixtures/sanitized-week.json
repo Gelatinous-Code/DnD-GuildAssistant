@@ -1,0 +1,202 @@
+{
+  "fixtureVersion": 1,
+  "synthetic": true,
+  "notice": "All names and identifiers are invented. This file contains no production guild or member data.",
+  "timestamps": "Unix epoch milliseconds",
+  "guild": {
+    "guildId": "synthetic-guild-001",
+    "timezone": "America/Denver",
+    "eventChannelId": "synthetic-channel-events",
+    "tableChannelId": "synthetic-channel-tables",
+    "reminderChannelId": "synthetic-channel-reminders",
+    "adminRoleId": "synthetic-role-admin",
+    "gmRoleId": "synthetic-role-weekly-gm",
+    "reminderRoleId": "synthetic-role-gaming",
+    "weeklyDay": 6,
+    "weeklyTime": "18:00",
+    "signupOpenLeadDays": 7,
+    "signupLockLeadHours": 24,
+    "tableMinSize": 4,
+    "tablePreferredSize": 6,
+    "tableMaxSize": 6
+  },
+  "event": {
+    "eventId": "synthetic-event-2026-08-08",
+    "title": "Synthetic Saturday Games",
+    "source": "native",
+    "status": "planned",
+    "signupOpensAt": 1785628800000,
+    "signupLocksAt": 1786147200000,
+    "startsAt": 1786233600000,
+    "endsAt": 1786248000000,
+    "signupMessageId": "synthetic-message-signup",
+    "tableMessageId": null
+  },
+  "gmSignups": [
+    {
+      "userId": "synthetic-gm-ada",
+      "displayName": "Ada Dawn",
+      "status": "active",
+      "signedUpAt": 1785632400000,
+      "selectionCount": 0,
+      "lastSelectedAt": null
+    },
+    {
+      "userId": "synthetic-gm-borin",
+      "displayName": "Borin Ember",
+      "status": "active",
+      "signedUpAt": 1785636000000,
+      "selectionCount": 1,
+      "lastSelectedAt": 1784397600000
+    },
+    {
+      "userId": "synthetic-gm-cyra",
+      "displayName": "Cyra Vale",
+      "status": "active",
+      "signedUpAt": 1785639600000,
+      "selectionCount": 1,
+      "lastSelectedAt": 1785002400000
+    },
+    {
+      "userId": "synthetic-gm-dax",
+      "displayName": "Dax Rowan",
+      "status": "withdrawn",
+      "signedUpAt": 1785643200000,
+      "withdrawnAt": 1786060800000,
+      "selectionCount": 0,
+      "lastSelectedAt": null
+    }
+  ],
+  "playerSignups": [
+    {
+      "userId": "synthetic-player-01",
+      "displayName": "Aria Quill",
+      "status": "active",
+      "signedUpAt": 1785646800000
+    },
+    {
+      "userId": "synthetic-player-02",
+      "displayName": "Bex Copper",
+      "status": "active",
+      "signedUpAt": 1785650400000
+    },
+    {
+      "userId": "synthetic-player-03",
+      "displayName": "Corin Moss",
+      "status": "active",
+      "signedUpAt": 1785654000000
+    },
+    {
+      "userId": "synthetic-player-04",
+      "displayName": "Devi Star",
+      "status": "active",
+      "signedUpAt": 1785657600000
+    },
+    {
+      "userId": "synthetic-player-05",
+      "displayName": "Eli Fen",
+      "status": "active",
+      "signedUpAt": 1785661200000
+    },
+    {
+      "userId": "synthetic-player-06",
+      "displayName": "Fara Wren",
+      "status": "active",
+      "signedUpAt": 1785664800000
+    },
+    {
+      "userId": "synthetic-player-07",
+      "displayName": "Galen Pike",
+      "status": "active",
+      "signedUpAt": 1785668400000
+    },
+    {
+      "userId": "synthetic-player-08",
+      "displayName": "Hale Reed",
+      "status": "active",
+      "signedUpAt": 1785672000000
+    },
+    {
+      "userId": "synthetic-player-09",
+      "displayName": "Iona Ash",
+      "status": "active",
+      "signedUpAt": 1785675600000
+    },
+    {
+      "userId": "synthetic-player-10",
+      "displayName": "Jori Flint",
+      "status": "active",
+      "signedUpAt": 1785679200000
+    },
+    {
+      "userId": "synthetic-player-11",
+      "displayName": "Kestrel Blue",
+      "status": "active",
+      "signedUpAt": 1785682800000
+    },
+    {
+      "userId": "synthetic-player-12",
+      "displayName": "Lio Thorn",
+      "status": "withdrawn",
+      "signedUpAt": 1785686400000,
+      "withdrawnAt": 1786060800000
+    }
+  ],
+  "expectedDraft": {
+    "algorithmVersion": "mvp-v1",
+    "activeGmCount": 3,
+    "activePlayerCount": 11,
+    "selectedGmUserIds": [
+      "synthetic-gm-ada",
+      "synthetic-gm-borin"
+    ],
+    "unselectedGmUserIds": [
+      "synthetic-gm-cyra"
+    ],
+    "tables": [
+      {
+        "tableNumber": 1,
+        "title": "Table 1 — Ada Dawn",
+        "capacity": 6,
+        "gmUserId": "synthetic-gm-ada",
+        "assignedPlayerUserIds": [
+          "synthetic-player-01",
+          "synthetic-player-03",
+          "synthetic-player-05",
+          "synthetic-player-07",
+          "synthetic-player-09",
+          "synthetic-player-11"
+        ]
+      },
+      {
+        "tableNumber": 2,
+        "title": "Table 2 — Borin Ember",
+        "capacity": 5,
+        "gmUserId": "synthetic-gm-borin",
+        "assignedPlayerUserIds": [
+          "synthetic-player-02",
+          "synthetic-player-04",
+          "synthetic-player-06",
+          "synthetic-player-08",
+          "synthetic-player-10"
+        ]
+      }
+    ],
+    "waitlistPlayerUserIds": [],
+    "rationale": "Eleven active players support two viable tables. The higher-priority two of three active GMs are selected, and seats balance 6/5 without exceeding the maximum."
+  },
+  "reminderExample": {
+    "ruleId": "synthetic-rule-lock",
+    "triggerKind": "signup_lock",
+    "offsetMinutes": -120,
+    "audienceKind": "configured_role",
+    "roleId": "synthetic-role-gaming",
+    "channelId": "synthetic-channel-reminders",
+    "mentionRole": true,
+    "messageTemplate": "Gaming signups lock in two hours. Please choose GM, player, or withdraw.",
+    "allowedMentionRoleIds": [
+      "synthetic-role-gaming"
+    ],
+    "idempotencyKey": "synthetic-event-2026-08-08:synthetic-rule-lock:1786140000000"
+  }
+}

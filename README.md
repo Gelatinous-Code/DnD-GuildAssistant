@@ -5,122 +5,207 @@
 [![CI](https://github.com/Gelatinous-Code/DnD-GuildAssistant/actions/workflows/ci.yml/badge.svg)](https://github.com/Gelatinous-Code/DnD-GuildAssistant/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A Discord assistant for organizing weekly tabletop games: GM signups, player
-capacity, table creation, reminders, and exports.
+A Discord-native weekly tabletop organizer for GM and player signups, fair GM
+rotation, automatic 4–6-player tables, table selection and waitlists, temporary
+GM roles, and safe reminders.
 
-The bot runs as a serverless Discord interactions endpoint on Cloudflare Workers.
-It is in early development; the current milestone provides a signed <code>/ping</code>
-command for the test guild.
+The bot is a serverless HTTP interaction endpoint on Cloudflare Workers. D1 is
+its source of truth and a Cron Trigger handles weekly orchestration; no computer
+or long-running gateway process must stay online.
 
-Live interaction endpoint:
+Live health endpoint:
 <https://dnd-new-dawn-guild-assistant.dnd-new-dawn-guild-assistant.workers.dev>
 
-## What works today
+## Functional MVP
 
-- Health reporting on <code>GET /</code>.
-- Ed25519 verification for Discord interaction requests.
-- Discord endpoint-validation PING/PONG handling.
-- A private <code>/ping</code> response with the caller's display name.
-- A 1 MiB interaction-body limit.
-- Automated unit tests and TypeScript/Workers type checks.
+M1–M3 are implemented:
 
-Planned guild-management features are tracked in
-[GitHub Issues](https://github.com/Gelatinous-Code/DnD-GuildAssistant/issues).
+- Per-server Discord setup, sanitized status, and actionable doctor commands.
+- Time-zone-aware weekly event creation across daylight-saving changes.
+- Explicit draft, open, locked, planned, published, archived, and cancelled
+  lifecycle state with audited, idempotent transitions.
+- Native GM/player/withdraw buttons backed by D1, plus audited admin corrections.
+- Deterministic GM rotation using fewest prior selections, oldest/never selected,
+  signup time, and Discord ID tie-breaks.
+- Deterministic table sizing that prefers six seats and reduces to five or four
+  when more GMs are viable.
+- Reviewable draft revisions with audited table-name, capacity, and GM overrides.
+- Explicit publication, Discord-enforced message nonces, and concurrency guards.
+- Player table choice/change/leave, atomic capacity enforcement, table-specific
+  waitlists, and deterministic promotion.
+- Bot-owned weekly GM role leases that preserve every manually assigned role.
+- Safe configured-role reminders, aggregate capacity warnings, atomic claims,
+  one-occurrence cooldowns, conditional organizer escalation, capped
+  retry/backoff, expiry, and explicit intentional resend.
+- A 15-minute scheduled orchestration pass with structured logs and isolated
+  failures.
+- Versioned D1 migrations and comprehensive automated tests.
 
-## Built with
+Raid Helper can remain beside the assistant for the broad gaming-interest poll
+and its existing CSV/Google Sheets handoff. Guild Assistant never scrapes another
+bot or depends on private Raid Helper behavior. See the
+[interoperability decision](docs/decisions/0001-raid-helper-boundary.md).
 
-- [Cloudflare Workers](https://workers.cloudflare.com/)
-- [Discord Interactions](https://discord.com/developers/docs/interactions/overview)
-- TypeScript and Node.js 22+
-- Vitest
+CSV export and direct Google Sheets automation remain M4, so M1–M3 are the
+functional weekly-operations MVP while Raid Helper supplies the existing export
+fallback.
+
+## Discord commands
+
+Admin commands require Manage Server and return private responses.
+
+| Command | Purpose |
+| --- | --- |
+| <code>/ping</code> | Verify the signed interaction endpoint. |
+| <code>/guild setup</code> | Configure text/announcement channel, GM/reminder/organizer roles, IANA time zone, schedule, table policy, and safe automation switches. |
+| <code>/guild status</code> | Show sanitized effective configuration and current weekly state. |
+| <code>/guild doctor</code> | Check channels, permissions, role existence, and hierarchy. |
+| <code>/week open</code> | Open the next scheduled or explicitly dated signup. |
+| <code>/week signup</code> | Record an audited late signup, cancellation, or admin correction. |
+| <code>/week lock</code> | Lock the signup snapshot. |
+| <code>/week plan</code> | Generate or regenerate a deterministic draft revision. |
+| <code>/week override</code> | Change one draft table's name, capacity, or active GM with an audit reason. |
+| <code>/week publish</code> | Explicitly publish the reviewed draft. |
+| <code>/week retry</code> | Recover publication, open, lock/plan, reminder, or role work safely. |
+| <code>/week skip</code> | Confirm an audited skip of one scheduled occurrence. |
+| <code>/week cancel</code> | Cancel an unfinished/published week with an audit reason. |
+| <code>/week archive</code> | Close the week and reconcile assistant-owned roles. |
+| <code>/roles sync</code> | Preview or apply weekly GM role reconciliation. |
+| <code>/reminder configure</code> | Preview and enable/disable the pre-lock reminder. |
+| <code>/reminder send</code> | Send once now or explicitly request an intentional resend. |
+
+Members use buttons on the signup and published table messages; they do not need
+admin commands.
+
+## Discord permissions
+
+Install with the <code>applications.commands</code> and <code>bot</code> scopes.
+Grant only:
+
+- View Channels
+- Send Messages
+- Embed Links
+- Read Message History
+- Manage Roles, only for weekly GM role automation
+- Attach Files later, when M4 exports are enabled
+
+Do not grant Administrator. Put the bot's integration role above the normal
+weekly GM role. If reminders must notify a role, make that role mentionable or
+grant the narrow Discord permission that allows the bot to mention it.
+
+The bot constructs <code>allowed_mentions</code> explicitly. It never enables
+<code>@everyone</code>, <code>@here</code>, arbitrary users, or undeclared roles.
 
 ## Quick start
 
 Requirements: Node.js 22 or newer, npm, a Cloudflare account, and a Discord
-application with a test server.
+application installed in a test server.
 
 1. Install dependencies:
 
        npm install
 
-2. Copy <code>.dev.vars.example</code> to <code>.dev.vars</code>:
+2. Copy the local environment template:
 
        Copy-Item .dev.vars.example .dev.vars
 
-3. Fill in the values from the Discord Developer Portal. Never commit
-   <code>.dev.vars</code> or share its bot token.
+3. Fill in the Discord application ID, test guild ID, public key, and bot token.
+   Never commit <code>.dev.vars</code> or paste its token into logs/issues.
 
-4. Start the Worker locally:
+4. Apply the local D1 migration:
+
+       npm run db:migrate:local
+
+5. Start the Worker:
 
        npm run dev
 
-Discord cannot call localhost directly, so local mode is primarily useful for
-health checks and automated tests. Deploy the Worker for Discord's endpoint
-handshake.
+Discord cannot call localhost directly. Local mode is useful for health,
+migration, and automated testing; deploy for Discord endpoint validation.
 
 ## Configuration
 
-| Variable | Used by | Secret | Purpose |
-| --- | --- | --- | --- |
-| <code>DISCORD_APPLICATION_ID</code> | Command registration | No | Identifies the Discord application. |
-| <code>DISCORD_TEST_GUILD_ID</code> | Command registration | No | Targets fast, guild-scoped command registration. |
-| <code>DISCORD_PUBLIC_KEY</code> | Worker | No | Verifies signed Discord interaction requests. |
-| <code>DISCORD_BOT_TOKEN</code> | Command registration | **Yes** | Authorizes Discord API calls. Keep it only in local secrets. |
+| Variable or binding | Secret | Purpose |
+| --- | --- | --- |
+| <code>DB</code> | No | D1 binding for all tenant-scoped workflow state. |
+| <code>DISCORD_APPLICATION_ID</code> | No | Discord application and command registration. |
+| <code>DISCORD_TEST_GUILD_ID</code> | No | Immediate guild-scoped command registration. |
+| <code>DISCORD_PUBLIC_KEY</code> | No | Ed25519 verification for every interaction. |
+| <code>DISCORD_BOT_TOKEN</code> | **Yes** | Discord REST publication, role, reminder, and registration calls. |
 
-The checked-in test-environment identifiers are public IDs, not credentials.
-Treat the bot token and any future API keys as secrets.
+Discord snowflakes and the application public key are public identifiers, not
+credentials. The bot token and Cloudflare credentials are secrets.
 
-## Deploy and register the command
+## Deploy
 
-1. Authenticate with Cloudflare:
+Authenticate Wrangler, create a D1 database once, place its database ID in
+<code>wrangler.jsonc</code>, then:
 
-       npx wrangler login
+    npx wrangler secret put DISCORD_PUBLIC_KEY
+    npx wrangler secret put DISCORD_BOT_TOKEN
+    npm run db:migrate:remote
+    npm run check
+    npm run deploy
+    npm run commands:register
 
-2. Store the Discord public key as a Worker secret:
+Set the deployed Worker URL as the Discord application's Interactions Endpoint
+URL. In the test server, run <code>/guild setup</code>, then
+<code>/guild doctor</code>, and resolve every required failure before a real
+weekly cycle. First-time setup leaves scheduling and role sync paused unless
+their explicit options are enabled.
 
-       npx wrangler secret put DISCORD_PUBLIC_KEY
-
-3. Deploy:
-
-       npm run deploy
-
-4. Copy the deployed URL into **Discord Developer Portal > General Information >
-   Interactions Endpoint URL** and save it.
-
-5. Register the test-guild command:
-
-       npm run commands:register
-
-6. Run <code>/ping</code> in the test server. The reply is visible only to the caller.
+The checked-in Cron Trigger runs every 15 minutes. Per-guild local schedule and
+time zone live in D1; repeated Cloudflare deliveries use conditional writes,
+stable operation keys, and Discord nonces.
 
 ## Development commands
 
 | Command | Purpose |
 | --- | --- |
-| <code>npm run dev</code> | Run the Worker locally with Wrangler. |
-| <code>npm test</code> | Run the test suite once. |
+| <code>npm run check</code> | Generated-type check, TypeScript compile, and all tests. |
+| <code>npm test</code> | Run the Vitest suite once. |
 | <code>npm run test:watch</code> | Run tests in watch mode. |
 | <code>npm run types</code> | Regenerate Cloudflare Worker types. |
-| <code>npm run typecheck</code> | Check generated Worker types and TypeScript. |
-| <code>npm run commands:register</code> | Register commands in the configured test guild. |
-| <code>npm run deploy</code> | Deploy the Worker to Cloudflare. |
+| <code>npm run db:migrate:local</code> | Apply pending migrations to local D1. |
+| <code>npm run db:migrate:remote</code> | Apply pending migrations to remote D1. |
+| <code>npm run dev</code> | Run the Worker locally. |
+| <code>npm run deploy</code> | Deploy Worker code, bindings, and Cron Trigger. |
+| <code>npm run commands:register</code> | Replace test-guild command definitions. |
 
 ## Project layout
 
 | Path | Purpose |
 | --- | --- |
-| <code>src/</code> | Worker request handling and Discord types |
-| <code>test/</code> | Vitest tests |
-| <code>scripts/</code> | Command and repository utilities |
-| <code>assets/brand/</code> | Project artwork |
-| <code>.github/</code> | CI, dependency, issue, PR, and release configuration |
+| <code>src/app.ts</code> | Slash-command, component, and scheduled routing. |
+| <code>src/domain/</code> | Pure lifecycle and deterministic planning policies. |
+| <code>src/storage/</code> | Bound-statement D1 repository. |
+| <code>src/*-service.ts</code> | Weekly, reminder, and role orchestration. |
+| <code>migrations/</code> | Versioned D1 schema migrations. |
+| <code>test/</code> | Unit, policy, persistence, retry, and service tests. |
+| <code>docs/</code> | Architecture decision, GM policy, and operations runbook. |
+| <code>scripts/</code> | Discord command and repository utilities. |
+| <code>assets/brand/</code> | Project artwork. |
+
+## Operations, cost, and handoff
+
+The runtime uses Cloudflare Workers, D1, and Cron Triggers and is designed to fit
+within the platform's free tier for a single guild's weekly traffic, subject to
+Cloudflare's current limits. There is no always-on VM. Keep the GitHub
+organization, Discord application, Cloudflare account, and recovery factors
+organization-owned with at least two maintainers so one volunteer's departure
+does not become a financial or access emergency.
+
+Read the [operations guide](docs/operations.md) for activation, failure recovery,
+retention, credential rotation, and maintainer handoff. The
+[GM priority policy](docs/gm-priority-policy.md) documents every deterministic
+tie and edge case.
 
 ## Contributing and security
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening
-a pull request. Report vulnerabilities privately according to
-[SECURITY.md](SECURITY.md), not through a public issue.
+Contributions are welcome; read [CONTRIBUTING.md](CONTRIBUTING.md). Report
+vulnerabilities privately according to [SECURITY.md](SECURITY.md), never in a
+public issue.
 
 ## License
 
-This project is available under the [MIT License](LICENSE).
+Available under the [MIT License](LICENSE).

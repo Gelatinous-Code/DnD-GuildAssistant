@@ -1,3 +1,5 @@
+import { commands } from "./commands.mjs";
+
 const requiredVariables = [
   "DISCORD_APPLICATION_ID",
   "DISCORD_TEST_GUILD_ID",
@@ -10,14 +12,6 @@ if (missingVariables.length > 0) {
   console.error("Copy .dev.vars.example to .dev.vars and fill in the missing values.");
   process.exit(1);
 }
-
-const commands = [
-  {
-    name: "ping",
-    description: "Check whether the New Dawn Guild Assistant is awake.",
-    type: 1,
-  },
-];
 
 const endpoint =
   `https://discord.com/api/v10/applications/${process.env.DISCORD_APPLICATION_ID}` +

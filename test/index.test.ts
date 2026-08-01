@@ -9,7 +9,9 @@ import { handleRequest } from "../src/index";
 
 const mockedVerifyKey = vi.mocked(verifyKey);
 const env = {
+  DB: {} as D1Database,
   DISCORD_PUBLIC_KEY: "test-public-key",
+  DISCORD_BOT_TOKEN: "test-bot-token",
   DISCORD_APPLICATION_ID: "1533171671886725293",
   DISCORD_TEST_GUILD_ID: "1533181439376494642",
 } satisfies Env;
@@ -78,6 +80,7 @@ describe("Discord interaction endpoint", () => {
       data: {
         content: "🎲 Pong! The guild assistant is awake, Daren.",
         flags: 64,
+        allowed_mentions: { parse: [] },
       },
     });
   });

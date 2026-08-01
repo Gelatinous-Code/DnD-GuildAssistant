@@ -2,19 +2,14 @@ import { verifyKey } from "discord-interactions";
 import {
   InteractionResponseType,
   InteractionType,
-  MessageFlags,
   type DiscordInteraction,
 } from "./discord";
+import { handleDiscordInteraction, handleScheduled } from "./app";
 
 const MAX_INTERACTION_BYTES = 1024 * 1024;
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status });
-}
-
-function displayName(interaction: DiscordInteraction): string {
-  const user = interaction.member?.user ?? interaction.user;
-  return user?.global_name ?? user?.username ?? "adventurer";
 }
 
 async function readInteractionBody(request: Request): Promise<string | null> {
@@ -56,7 +51,11 @@ async function readInteractionBody(request: Request): Promise<string | null> {
   return new TextDecoder().decode(body);
 }
 
-export async function handleRequest(request: Request, env: Env): Promise<Response> {
+export async function handleRequest(
+  request: Request,
+  env: Env,
+  context?: ExecutionContext,
+): Promise<Response> {
   if (request.method === "GET") {
     return json({
       name: "DnD New Dawn Guild Assistant",
@@ -96,28 +95,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return json({ type: InteractionResponseType.Pong });
   }
 
-  if (
-    interaction.type === InteractionType.ApplicationCommand &&
-    interaction.data?.name === "ping"
-  ) {
-    return json({
-      type: InteractionResponseType.ChannelMessageWithSource,
-      data: {
-        content: `🎲 Pong! The guild assistant is awake, ${displayName(interaction)}.`,
-        flags: MessageFlags.Ephemeral,
-      },
-    });
-  }
-
-  return json({
-    type: InteractionResponseType.ChannelMessageWithSource,
-    data: {
-      content: "I don't recognize that command yet.",
-      flags: MessageFlags.Ephemeral,
-    },
-  });
+  return handleDiscordInteraction(interaction, env, context);
 }
 
 export default {
   fetch: handleRequest,
+  scheduled(controller, env, context) {
+    context.waitUntil(handleScheduled(env, controller.scheduledTime));
+  },
 } satisfies ExportedHandler<Env>;

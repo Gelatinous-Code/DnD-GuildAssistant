@@ -18,14 +18,17 @@ Use release labels on merged pull requests:
 2. Choose the next version and move entries from Unreleased into a dated
    changelog section.
 3. Update <code>package.json</code> and <code>package-lock.json</code> to the same version.
-4. Run <code>npm ci</code>, <code>npm test</code>, and <code>npm run typecheck</code>.
-5. Merge the release preparation pull request.
-6. Create and push an annotated tag:
+4. Run <code>npm ci</code>, <code>npm run db:migrate:local</code>, and
+   <code>npm run check</code>.
+5. Back up production D1 when a release includes a migration, then apply pending
+   migrations before deploying Worker code that depends on them.
+6. Merge the release preparation pull request.
+7. Create and push an annotated tag:
 
        git tag -a v0.1.0 -m "Release v0.1.0"
        git push origin v0.1.0
 
-7. Create a GitHub release from that tag, use the automatically generated notes
+8. Create a GitHub release from that tag, use the automatically generated notes
    as a starting point, and verify deployment instructions before publishing.
 
 Prereleases may use identifiers such as <code>v0.2.0-beta.1</code>. Do not create
