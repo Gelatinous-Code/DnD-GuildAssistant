@@ -50,6 +50,13 @@ export const commands = [
         description: "Show the setup dashboard or change only the settings you provide.",
         options: [
           {
+            type: 3,
+            name: "preset",
+            description: "Discover this guild's known channels and permanent audience roles.",
+            choices: [{ name: "Second Dawn Guild", value: "second_dawn" }],
+          },
+
+          {
             type: 7,
             name: "channel",
             description: "Required once: channel for signup, tables, and built-in reminders.",

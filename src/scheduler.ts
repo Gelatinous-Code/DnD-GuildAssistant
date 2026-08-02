@@ -341,7 +341,10 @@ export async function runScheduledTick(
       );
     }
 
-    if (event.status === "open" && !event.signupMessageId) {
+    const signupPostReady = now < playerSignupOpensAt
+      ? Boolean(event.gmSignupMessageId || event.signupMessageId)
+      : Boolean(event.signupMessageId);
+    if (event.status === "open" && !signupPostReady) {
       await capturePersisted(
         repository,
         actions,

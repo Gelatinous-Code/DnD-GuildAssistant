@@ -13,6 +13,9 @@ The project follows [Semantic Versioning](https://semver.org/). Dates use the
   weekly organizers.
 - Audience-specific player, organizer, Discord setup, deployment, and operations
   guides with Discord and computer commands kept in separate paths.
+- One-command Second Dawn guild setup that discovers existing GM/player signup
+  channels and permanent audience roles, with staged audience-specific cards
+  and no broad mentions.
 - Initial Cloudflare Worker Discord interaction endpoint.
 - Signed request verification, endpoint PING/PONG handling, and ping command.
 - Tests, type checking, and repository community health files.

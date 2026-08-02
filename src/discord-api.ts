@@ -418,6 +418,11 @@ export class DiscordRestClient {
     return this.#request("GET", `/guilds/${guildId}/roles`);
   }
 
+  getGuildChannels(guildId: Snowflake): Promise<DiscordChannel[]> {
+    requireSnowflake(guildId, "guildId");
+    return this.#request("GET", `/guilds/${guildId}/channels`);
+  }
+
   getGuildRoleMemberCounts(guildId: Snowflake): Promise<Record<Snowflake, number>> {
     requireSnowflake(guildId, "guildId");
     return this.#request("GET", `/guilds/${guildId}/roles/member-counts`);
@@ -634,6 +639,7 @@ export interface SignupMessageInput {
   playerSignupOpensAt?: DiscordDate;
   description?: string;
   status: "open" | "locked" | "archived";
+  audience?: "combined" | "gm" | "player";
   gmSignupEnabled?: boolean;
   playerSignupEnabled?: boolean;
   withdrawEnabled?: boolean;
@@ -648,6 +654,7 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
   const gmSignupEnabled = input.gmSignupEnabled ?? stageOpen;
   const playerSignupEnabled = input.playerSignupEnabled ?? stageOpen;
   const withdrawEnabled = input.withdrawEnabled ?? stageOpen;
+  const audience = input.audience ?? "combined";
   const timing = [
     `**When:** ${discordTimestamp(input.startsAt)} (${discordTimestamp(input.startsAt, "R")})`,
     input.playerSignupOpensAt && !playerSignupEnabled
@@ -673,16 +680,16 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
         ),
         color: input.status === "open" ? 0x57f287 : input.status === "locked" ? 0xfee75c : 0x99aab5,
         fields: [
-          {
+          ...(audience === "player" ? [] : [{
             name: `Game Masters (${gmNames.length})`,
             value: displayList(gmNames),
             inline: true,
-          },
-          {
+          }]),
+          ...(audience === "gm" ? [] : [{
             name: `Players (${playerNames.length})`,
             value: displayList(playerNames),
             inline: true,
-          },
+          }]),
         ],
         footer: {
           text:
@@ -705,22 +712,22 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
             {
               type: ComponentType.ActionRow,
               components: [
-                {
-                  type: ComponentType.Button,
-                  style: ButtonStyle.Primary,
-                  custom_id: signupCustomId(input.eventId, "gm"),
-                  label: "Run a Game",
-                  emoji: { name: "🧙" },
-                  disabled: !gmSignupEnabled,
-                },
-                {
-                  type: ComponentType.Button,
-                  style: ButtonStyle.Success,
-                  custom_id: signupCustomId(input.eventId, "player"),
-                  label: "Play",
-                  emoji: { name: "⚔️" },
-                  disabled: !playerSignupEnabled,
-                },
+                ...(audience === "player" ? [] : [{
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Primary,
+                    custom_id: signupCustomId(input.eventId, "gm"),
+                    label: "Run a Game",
+                    emoji: { name: "🧙" },
+                    disabled: !gmSignupEnabled,
+                  }]),
+                ...(audience === "gm" ? [] : [{
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Success,
+                    custom_id: signupCustomId(input.eventId, "player"),
+                    label: "Play",
+                    emoji: { name: "⚔️" },
+                    disabled: !playerSignupEnabled,
+                  }]),
                 {
                   type: ComponentType.Button,
                   style: ButtonStyle.Secondary,

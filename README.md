@@ -59,9 +59,9 @@ computer has to remain switched on.
 ## Permissions and privacy
 
 The bot should not receive Discord Administrator permission. Its core channel
-permissions are View Channels, Send Messages, Embed Links, and Read Message
-History. Manage Roles and Attach Files are optional and should be granted only
-when those features are used.
+permissions are View Channel, Send Messages, Embed Links, and Read Message
+History in each configured workflow channel. Manage Roles and Attach Files are
+optional and should be granted only when those features are used.
 
 Admin responses and priority-token details are private. The bot restricts
 mentions, does not require Google or Raid Helper credentials, and provides a

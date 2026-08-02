@@ -378,7 +378,7 @@ describe("D1 persistence model", () => {
     expect(fake.statements[1]?.sql).toContain(
       "admin_role_id = CASE WHEN ? = 1 THEN ? ELSE admin_role_id END",
     );
-    expect(fake.statements[1]?.values.slice(3, 9)).toEqual([
+    expect(fake.statements[1]?.values.slice(5, 11)).toEqual([
       1, null, 1, null, 1, null,
     ]);
   });

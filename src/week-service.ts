@@ -177,7 +177,8 @@ export class WeekService {
     const event = await this.repository.getCurrentWeeklyEvent(guildId);
     const lines = [
       "## Guild Assistant status",
-      "**Channel:** " + (config.eventChannelId ? "<#" + config.eventChannelId + ">" : "missing"),
+      "**Player signup and tables:** " + (config.eventChannelId ? "<#" + config.eventChannelId + ">" : "missing"),
+      "**GM signup channel:** " + (config.gmSignupChannelId ? "<#" + config.gmSignupChannelId + ">" : "same as player signup"),
       "**Weekly GM role:** " +
         (config.gmRoleId ? "<@&" + config.gmRoleId + ">" : "optional; not configured"),
       "**Reminder role:** " +
@@ -454,35 +455,50 @@ export class WeekService {
   }
 
 
-  async signupPayload(event: WeeklyEvent): Promise<DiscordMessagePayload> {
+  async signupPayload(
+    event: WeeklyEvent,
+    audience: "combined" | "gm" | "player" = "combined",
+  ): Promise<DiscordMessagePayload> {
     const [gms, players] = await Promise.all([
       this.repository.listActiveSignups(event.eventId, "gm"),
       this.repository.listActiveSignups(event.eventId, "player"),
     ]);
     const now = this.now();
     const playerSignupOpensAt = event.playerSignupOpensAt ?? event.signupOpensAt;
-    const gmSignupEnabled = event.status === "open";
-    const playerSignupEnabled = gmSignupEnabled && now >= playerSignupOpensAt;
+    const gmSignupEnabled = event.status === "open" && audience !== "player";
+    const playerSignupEnabled =
+      event.status === "open" && audience !== "gm" && now >= playerSignupOpensAt;
     const withdrawEnabled =
       (event.status === "open" || event.status === "published") &&
       now < event.tableSelectionClosesAt;
+    const description =
+      audience === "gm"
+        ? gmSignupEnabled
+          ? "Volunteer to run a game. This post is routed to the guild's GM signup channel."
+          : "GM signup is closed. Withdraw only if you are dropping from this week's games."
+        : audience === "player"
+          ? playerSignupEnabled
+            ? "Sign up to play. Signup order reserves available capacity until open seating."
+            : "Player signup is not open yet."
+          : playerSignupEnabled
+            ? "Sign up to run or play. Player signup order reserves available capacity until open seating."
+            : gmSignupEnabled
+              ? "GM signup is open. Player interest opens at the time shown below."
+              : "Tables are published. Withdraw only if you are dropping from this week's games.";
     return renderSignupMessage({
       eventId: event.eventId,
       title: event.title,
       startsAt: event.startsAt,
       playerSignupOpensAt,
       signupDeadline: event.signupLocksAt,
-      description: playerSignupEnabled
-        ? "Sign up to run or play. Player signup order reserves available capacity until open seating."
-        : gmSignupEnabled
-          ? "GM signup is open. Player interest opens at the time shown below."
-          : "Tables are published. Withdraw only if you are dropping from this week's games.",
+      description,
       status:
         event.status === "open"
           ? "open"
           : event.status === "archived" || event.status === "cancelled"
             ? "archived"
             : "locked",
+      audience,
       gmSignupEnabled,
       playerSignupEnabled,
       withdrawEnabled,
@@ -495,26 +511,96 @@ export class WeekService {
     event: WeeklyEvent,
     config: GuildConfig,
   ): Promise<void> {
-    const payload = await this.signupPayload(event);
+    const playerChannelId = config.eventChannelId;
+    if (!playerChannelId) throw new UserFacingError("No player signup channel is configured.");
+
+    const gmChannelId = config.gmSignupChannelId;
+    if (!gmChannelId || gmChannelId === playerChannelId) {
+      const payload = await this.signupPayload(event, "combined");
+      if (event.signupChannelId && event.signupMessageId) {
+        await this.discord.editChannelMessage(
+          event.signupChannelId,
+          event.signupMessageId,
+          payload,
+        );
+        return;
+      }
+      const message = await this.discord.sendChannelMessage(playerChannelId, {
+        ...payload,
+        nonce: discordNonce("signup:" + event.eventId),
+        enforce_nonce: true,
+      });
+      await this.repository.setEventMessages(event.eventId, {
+        signupChannelId: playerChannelId,
+        signupMessageId: message.id,
+      });
+      return;
+    }
+
+    const gmPayload = await this.signupPayload(event, "gm");
+    if (event.gmSignupChannelId && event.gmSignupMessageId) {
+      await this.discord.editChannelMessage(
+        event.gmSignupChannelId,
+        event.gmSignupMessageId,
+        gmPayload,
+      );
+    } else {
+      const message = await this.discord.sendChannelMessage(gmChannelId, {
+        ...gmPayload,
+        nonce: discordNonce("signup-gm:" + event.eventId),
+        enforce_nonce: true,
+      });
+      await this.repository.setEventMessages(event.eventId, {
+        gmSignupChannelId: gmChannelId,
+        gmSignupMessageId: message.id,
+      });
+    }
+
+    const playerSignupOpensAt = event.playerSignupOpensAt ?? event.signupOpensAt;
+    if (this.now() < playerSignupOpensAt && !event.signupMessageId) return;
+
+    const playerPayload = await this.signupPayload(event, "player");
     if (event.signupChannelId && event.signupMessageId) {
       await this.discord.editChannelMessage(
         event.signupChannelId,
         event.signupMessageId,
-        payload,
+        playerPayload,
       );
       return;
     }
-    const channelId = config.eventChannelId;
-    if (!channelId) throw new UserFacingError("No event channel is configured.");
-    const message = await this.discord.sendChannelMessage(channelId, {
-      ...payload,
-      nonce: discordNonce("signup:" + event.eventId),
+    const message = await this.discord.sendChannelMessage(playerChannelId, {
+      ...playerPayload,
+      nonce: discordNonce("signup-player:" + event.eventId),
       enforce_nonce: true,
     });
     await this.repository.setEventMessages(event.eventId, {
-      signupChannelId: channelId,
+      signupChannelId: playerChannelId,
       signupMessageId: message.id,
     });
+  }
+
+  async refreshSignupPosts(event: WeeklyEvent): Promise<void> {
+    const split = Boolean(event.gmSignupChannelId && event.gmSignupMessageId);
+    const edits: Promise<unknown>[] = [];
+    if (event.gmSignupChannelId && event.gmSignupMessageId) {
+      edits.push(
+        this.discord.editChannelMessage(
+          event.gmSignupChannelId,
+          event.gmSignupMessageId,
+          await this.signupPayload(event, "gm"),
+        ),
+      );
+    }
+    if (event.signupChannelId && event.signupMessageId) {
+      edits.push(
+        this.discord.editChannelMessage(
+          event.signupChannelId,
+          event.signupMessageId,
+          await this.signupPayload(event, split ? "player" : "combined"),
+        ),
+      );
+    }
+    await Promise.all(edits);
   }
 
   async changeSignup(input: {
@@ -652,13 +738,7 @@ export class WeekService {
       );
     }
     const locked = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
-    if (locked.signupChannelId && locked.signupMessageId) {
-      await this.discord.editChannelMessage(
-        locked.signupChannelId,
-        locked.signupMessageId,
-        await this.signupPayload(locked),
-      );
-    }
+    await this.refreshSignupPosts(locked);
     await this.repository.appendAudit({
       guildId,
       eventId: event.eventId,
@@ -730,13 +810,7 @@ export class WeekService {
       if (bundle) await this.refreshPublishedTables(event, bundle);
     }
     const latest = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
-    if (latest.signupChannelId && latest.signupMessageId) {
-      await this.discord.editChannelMessage(
-        latest.signupChannelId,
-        latest.signupMessageId,
-        await this.signupPayload(latest),
-      );
-    }
+    await this.refreshSignupPosts(latest);
     await this.repository.appendAudit({
       guildId: input.guildId,
       eventId: event.eventId,
@@ -1733,13 +1807,7 @@ export class WeekService {
       archivedAt: event.archivedAt ?? this.now(),
       updatedAt: this.now(),
     };
-    if (projectedArchived.signupChannelId && projectedArchived.signupMessageId) {
-      await this.discord.editChannelMessage(
-        projectedArchived.signupChannelId,
-        projectedArchived.signupMessageId,
-        await this.signupPayload(projectedArchived),
-      );
-    }
+    await this.refreshSignupPosts(projectedArchived);
     if (planBeforeArchive && !hasPublishedPlan) {
       const bundle = await this.repository.getPlanBundle(planBeforeArchive.planId);
       if (bundle) await this.refreshPublishedTables(projectedArchived, bundle, true);
@@ -1786,13 +1854,7 @@ export class WeekService {
     );
     if (!changed) throw new UserFacingError("The week changed; run /week status and retry.");
     const cancelled = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
-    if (cancelled.signupChannelId && cancelled.signupMessageId) {
-      await this.discord.editChannelMessage(
-        cancelled.signupChannelId,
-        cancelled.signupMessageId,
-        await this.signupPayload(cancelled),
-      );
-    }
+    await this.refreshSignupPosts(cancelled);
     const plan = await this.repository.getCurrentPlan(event.eventId);
     if (plan) {
       const bundle = await this.repository.getPlanBundle(plan.planId);

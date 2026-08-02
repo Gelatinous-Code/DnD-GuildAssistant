@@ -20,7 +20,37 @@ Decide these things with the people who run game night:
 Optional reminder and Weekly GM roles can wait. The basic workflow does not need
 them.
 
-## The shortest safe setup
+## Second Dawn: one-command setup
+
+The Second Dawn server can reuse its existing structure. Give the bot **View
+Channel**, **Send Messages**, **Embed Links**, and **Read Message History** in
+both `#gm-sign-up` and `#game-sign-ups`, then run:
+
+```text
+/guild setup preset:Second Dawn Guild
+```
+
+The preset discovers these exact resources:
+
+- channels: `gm-sign-up` and `game-sign-ups`;
+- permanent roles: `GM`, `Guild Player`, and `Administrator`.
+
+GM signup opens in `#gm-sign-up`. When the player stage opens, a player-only
+card is created in `#game-sign-ups`; tables and built-in reminders also use
+that player channel. Neither card permits `@everyone`, `@here`, or user
+mentions.
+
+Discord channel visibility remains the signup boundary. The bot verifies that
+the permanent `GM` role exists, but it does not inspect that role when a button
+is clicked and never adds or removes it. `Guild Player` becomes the optional
+reminder audience, and `Administrator` becomes the capacity-escalation role.
+Those roles are pinged only if the corresponding notification feature is later
+enabled. Automation remains Paused after setup.
+
+If any required name is missing or duplicated, nothing is saved. Correct the
+server resource and run the same command again.
+
+## Generic one-channel setup
 
 ### 1. Make one channel
 
@@ -105,7 +135,7 @@ remain only when you intentionally do not use that optional feature.
 
 | Field | Meaning |
 | --- | --- |
-| `channel` | Where signup posts, tables, and built-in reminders appear. |
+| `channel` | Generic fallback where the combined signup card, tables, and built-in reminders appear. |
 | `timezone` | The guild's local city-based time zone. |
 | `gm_day`, `gm_time` | When members may start volunteering to run games. |
 | `player_day`, `player_time` | When members may start signing up to play. |

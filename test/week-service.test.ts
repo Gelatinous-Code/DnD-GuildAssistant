@@ -817,6 +817,52 @@ describe("WeekService", () => {
       signupMessageId: "message-1",
     });
   });
+  it("routes staged GM and player cards to their configured channels", async () => {
+    const repository = new FakeRepository();
+    const playerSignupOpensAt = NOW + 60 * 60_000;
+    repository.config = guildConfig({ gmSignupChannelId: "gm-sign-up-channel" });
+    repository.event = weeklyEvent("open", {
+      playerSignupOpensAt,
+      signupChannelId: null,
+      signupMessageId: null,
+      gmSignupChannelId: null,
+      gmSignupMessageId: null,
+    });
+    const discord = new FakeDiscord();
+
+    await service(repository, discord).openExistingEvent(repository.event);
+
+    expect(discord.sends).toHaveLength(1);
+    expect(discord.sends[0]?.channelId).toBe("gm-sign-up-channel");
+    expect(discord.sends[0]?.payload.components?.[0]?.components.map(
+      (button) => button.label,
+    )).toEqual(["Run a Game", "Withdraw"]);
+    expect(discord.sends[0]?.payload.allowed_mentions).toEqual({
+      parse: [], roles: [], users: [], replied_user: false,
+    });
+    expect(repository.event).toMatchObject({
+      gmSignupChannelId: "gm-sign-up-channel",
+      gmSignupMessageId: "message-1",
+      signupMessageId: null,
+    });
+
+    await service(repository, discord, [], playerSignupOpensAt).openPlayerSignups(
+      repository.event!,
+    );
+
+    expect(discord.sends).toHaveLength(2);
+    expect(discord.sends[1]?.channelId).toBe("events-channel");
+    expect(discord.sends[1]?.payload.components?.[0]?.components.map(
+      (button) => button.label,
+    )).toEqual(["Play", "Withdraw"]);
+    expect(discord.sends[1]?.payload.embeds?.[0]?.fields?.map(
+      (field) => field.name,
+    )).toEqual(["Players (0)"]);
+    expect(repository.event).toMatchObject({
+      signupChannelId: "events-channel",
+      signupMessageId: "message-2",
+    });
+  });
 
   it("switches signup kind authoritatively and then withdraws", async () => {
     const repository = new FakeRepository();

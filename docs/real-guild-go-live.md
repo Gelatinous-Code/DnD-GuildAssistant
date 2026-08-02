@@ -68,8 +68,8 @@ to the deployer. Do not continue by guessing at setup.
 
 From this point through activation, every action happens in Discord.
 
-1. Create the real workflow channel.
-2. Run `/guild setup channel:#your-channel`.
+1. Confirm `#gm-sign-up`, `#game-sign-ups`, `GM`, `Guild Player`, and `Administrator` retain those exact names.
+2. Run `/guild setup preset:Second Dawn Guild`.
 3. Run `/guild setup` without options and read all five weekly stages.
 4. Change any wrong day, time, time zone, duration, or table size.
 5. Run `/guild status`, then `/guild doctor`.
