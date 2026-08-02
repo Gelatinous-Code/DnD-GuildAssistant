@@ -401,7 +401,7 @@ describe("D1 persistence model", () => {
     expect(created.tableSelectionClosesAt).toBe(1_000);
     expect(created.finalManifestMessageId).toBeNull();
     expect(fake.statements[0]?.sql).toContain("table_selection_closes_at");
-    expect(fake.statements[0]?.values[7]).toBe(1_000);
+    expect(fake.statements[0]?.values[9]).toBe(1_000);
   });
 
   it("gets the tenant-scoped latest weekly event", async () => {

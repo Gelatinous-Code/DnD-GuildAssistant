@@ -36,7 +36,6 @@ import {
   diagnoseInteractionPermissions,
   effectiveChannelPermissions,
   renderReminderTemplate,
-  validateGuildSchedule,
   validateTablePolicy,
 } from "./policy";
 import {
@@ -52,7 +51,12 @@ import {
   requireSuccessfulRoleReconciliation,
   RoleService,
 } from "./role-service";
-import { nextWeeklyOccurrence } from "./schedule";
+import { RosterNotificationService } from "./roster-notification-service";
+import {
+  NEW_DAWN_CADENCE,
+  nextWeeklyOccurrence,
+  validateWeeklyCadence,
+} from "./schedule";
 import { runScheduledTick, schedulerOperationKey } from "./scheduler";
 import {
   GuildRepository,
@@ -136,9 +140,17 @@ function automationMode(config: Pick<GuildConfig, "schedulingEnabled" | "autoPub
 }
 
 function setupDashboard(config: GuildConfig | null): string {
-  const timezone = config?.timezone ?? "America/Denver";
-  const weeklyDay = config?.weeklyDay ?? 6;
-  const weeklyTime = config?.weeklyTime ?? "18:30";
+  const timezone = config?.timezone ?? NEW_DAWN_CADENCE.timeZone;
+  const weeklyDay = config?.weeklyDay ?? NEW_DAWN_CADENCE.game.weekday;
+  const weeklyTime = config?.weeklyTime ?? NEW_DAWN_CADENCE.game.time;
+  const gmDay = config?.gmSignupDay ?? NEW_DAWN_CADENCE.gmSignup.weekday;
+  const gmTime = config?.gmSignupTime ?? NEW_DAWN_CADENCE.gmSignup.time;
+  const playerDay = config?.playerSignupDay ?? NEW_DAWN_CADENCE.playerSignup.weekday;
+  const playerTime = config?.playerSignupTime ?? NEW_DAWN_CADENCE.playerSignup.time;
+  const tablesDay = config?.tablePublishDay ?? NEW_DAWN_CADENCE.tablePublish.weekday;
+  const tablesTime = config?.tablePublishTime ?? NEW_DAWN_CADENCE.tablePublish.time;
+  const openDay = config?.openSeatingDay ?? NEW_DAWN_CADENCE.openSeating.weekday;
+  const openTime = config?.openSeatingTime ?? NEW_DAWN_CADENCE.openSeating.time;
   const next = Date.parse(
     nextWeeklyOccurrence(
       { weekday: weeklyDay, time: weeklyTime, timeZone: timezone },
@@ -148,33 +160,100 @@ function setupDashboard(config: GuildConfig | null): string {
   return [
     "## Guild Assistant setup",
     config
-      ? "Your saved configuration is shown below. Supply only the options you want to change."
-      : "Nothing has been saved yet. Only `channel` is required; confirm every built-in starting value.",
+      ? "Your saved configuration is below. Supply only the options you want to change."
+      : "Nothing is saved yet. Choose `channel` once to accept these New Dawn starting values.",
     "",
-    `${config?.eventChannelId ? "✅" : "❌"} **Workflow channel (signups, tables, built-in reminders):** ${
+    `${config?.eventChannelId ? "✅" : "❌"} **Workflow channel:** ${
       config?.eventChannelId ? `<#${config.eventChannelId}>` : "choose a text channel"
     }`,
-    `${config?.gmRoleId ? "✅" : "➖"} **Weekly GM role (optional):** ${
-      config?.gmRoleId ? `<@&${config.gmRoleId}>` : "skipped; role automation can remain off"
-    }`,
-    `✅ **Schedule:** ${weekdayName(weeklyDay)} at ${weeklyTime} (${timezone})`,
+    `✅ **Weekly flow (${timezone}):**`,
+    `1. GM signup opens ${weekdayName(gmDay)} at ${gmTime}`,
+    `2. Player interest opens ${weekdayName(playerDay)} at ${playerTime}`,
+    `3. Tables publish ${weekdayName(tablesDay)} at ${tablesTime}`,
+    `4. Remaining seats become first-come ${weekdayName(openDay)} at ${openTime}`,
+    `5. Games run ${weekdayName(weeklyDay)} at ${weeklyTime} for ${config?.eventDurationMinutes ?? 180} minutes`,
     `**Next game:** ${discordTimestamp(next)} (${discordTimestamp(next, "R")})`,
     `✅ **Tables:** ${config?.tableMinSize ?? 4} minimum / ${
       config?.tablePreferredSize ?? 6
     } preferred / ${config?.tableMaxSize ?? 6} maximum`,
-    `✅ **Signup window:** opens ${config?.signupOpenLeadDays ?? 7} days before; locks ${config?.signupLockLeadHours ?? 24} hours before`,
-    "**Table selection:** closes at game time; event duration is currently four hours",
+    "**Player capacity:** signup order reserves available seats. Extra players form one global waitlist.",
+    "**Drops:** before open seating, the first waitlisted player inherits the reservation and receives a private message.",
+    "**No table chosen:** no penalty; at open seating, every remaining spot is first-come until game time.",
+    `${config?.gmRoleId ? "✅" : "➖"} **Weekly GM role (optional):** ${
+      config?.gmRoleId ? `<@&${config.gmRoleId}>` : "not configured"
+    }`,
     `${config?.reminderRoleId ? "✅" : "➖"} **Reminder role (optional):** ${
       config?.reminderRoleId ? `<@&${config.reminderRoleId}>` : "channel-only reminders are available"
     }`,
     `${config?.adminRoleId ? "✅" : "➖"} **Organizer escalation role (optional):** ${
-      config?.adminRoleId ? `<@&${config.adminRoleId}>` : "skipped"
+      config?.adminRoleId ? `<@&${config.adminRoleId}>` : "not configured"
     }`,
     `${config?.schedulingEnabled ? "✅" : "⏸️"} **Automation mode:** ${config ? automationMode(config) : "paused"}`,
     "",
     config
-      ? "Next: run `/guild status`, then `/guild doctor`. Keep automation Paused for the test-guild pilot; the pilot enables Review and Autopilot at controlled points."
-      : "Next: run `/guild setup channel:#your-channel` to save these defaults, then `/guild status` and `/guild doctor`. Optional roles can be added later.",
+      ? "Next: run `/guild status`, then `/guild doctor`. Keep automation Paused until the test-guild pilot passes."
+      : "Next: run `/guild setup channel:#your-channel`, then `/guild status` and `/guild doctor`.",
+  ].join("\n");
+}
+
+function helpContent(interaction: DiscordInteraction): string {
+  const topic = stringOption(parseCommand(interaction), "topic") ?? "player";
+
+  if (topic === "gm") {
+    return [
+      "## Running a game",
+      "1. When GM signup opens, click **Run a Game** on the weekly post.",
+      "2. Volunteering does not guarantee selection; the bot uses the guild's fair rotation and the number of players.",
+      "3. If your availability changes, click **Withdraw** and tell an organizer.",
+      "4. After the game, an organizer confirms whether your table ran and records only roster changes.",
+      "",
+      "An eligible completed DM session earns two priority tokens. Check them with `/priority status`.",
+      "",
+      "Choose another `/help` topic for playing, priority tokens, or organizing.",
+    ].join("\n");
+  }
+
+  if (topic === "priority") {
+    return [
+      "## DM priority tokens",
+      "Eligible DMs receive two tokens after an organizer confirms a completed session.",
+      "",
+      "- `/priority status` privately shows your tokens and usable dates.",
+      "- `/priority use table_number:<number>` shows a private seating preview. Nothing changes until you confirm.",
+      "- `/priority release confirm:True` stops using the token but keeps your ordinary table request.",
+      "",
+      "Priority can move an ordinary player to a waitlist when a table is full. The preview explains the exact result first.",
+      "",
+      "If a token message did not arrive, run `/priority status`; message delivery does not create or erase the token.",
+    ].join("\n");
+  }
+
+  if (topic === "organizer") {
+    return [
+      "## Organizing the server",
+      "**First setup:** `/guild setup` -> `/guild status` -> `/guild doctor`.",
+      "",
+      "**Normal Review week:** use `/week status` to inspect the draft, then `/week publish` when it is correct.",
+      "",
+      "**After a game:** `/session status`, record only attendance differences, then `/session confirm`.",
+      "",
+      "**Stop safely:** `/guild automation mode:Paused confirm:True`, then check `/week status` and `/guild doctor`.",
+      "",
+      "Setup and lifecycle commands require **Manage Server**. Do not repair a roster by editing bot messages.",
+    ].join("\n");
+  }
+
+  return [
+    "## Playing this week",
+    "1. Click **Play** on the newest weekly signup post.",
+    "2. When tables appear, click **Join** on the table you want.",
+    "3. If that table is full, the bot places you on its waitlist. If all weekly places were already reserved, it explains the global waitlist.",
+    "4. At open seating, any still-free places become first-come, first-served.",
+    "",
+    "**Leave Table** clears only your table choice; you are still signed up for the week.",
+    "**Withdraw** drops you from the whole week and may promote the next waiting player.",
+    "",
+    "Use the newest bot message if an old button is rejected. Choose another `/help` topic for GMing, priority tokens, or organizing.",
   ].join("\n");
 }
 
@@ -371,33 +450,29 @@ function setupSummary(config: GuildConfig): string {
   return [
     "✅ Guild configuration saved.",
     "**Channel:** " + (config.eventChannelId ? "<#" + config.eventChannelId + ">" : "missing"),
+    "**Time zone:** " + config.timezone,
+    "**GM signup:** " +
+      weekdayName(config.gmSignupDay ?? NEW_DAWN_CADENCE.gmSignup.weekday) +
+      " at " + (config.gmSignupTime ?? NEW_DAWN_CADENCE.gmSignup.time),
+    "**Player interest:** " +
+      weekdayName(config.playerSignupDay ?? NEW_DAWN_CADENCE.playerSignup.weekday) +
+      " at " + (config.playerSignupTime ?? NEW_DAWN_CADENCE.playerSignup.time),
+    "**Tables publish:** " +
+      weekdayName(config.tablePublishDay ?? NEW_DAWN_CADENCE.tablePublish.weekday) +
+      " at " + (config.tablePublishTime ?? NEW_DAWN_CADENCE.tablePublish.time),
+    "**Open seating:** " +
+      weekdayName(config.openSeatingDay ?? NEW_DAWN_CADENCE.openSeating.weekday) +
+      " at " + (config.openSeatingTime ?? NEW_DAWN_CADENCE.openSeating.time),
+    "**Games:** " + weekdayName(config.weeklyDay) + " at " + config.weeklyTime +
+      " for " + config.eventDurationMinutes + " minutes",
+    "**Table sizes:** " + config.tableMinSize + " / " +
+      config.tablePreferredSize + " / " + config.tableMaxSize,
+    "**Player capacity:** signup-order reservations, one global waitlist, then first-come open seating.",
     "**Weekly GM role:** " +
       (config.gmRoleId ? "<@&" + config.gmRoleId + ">" : "optional; not configured"),
-    "**Organizer escalation role:** " +
-      (config.adminRoleId ? "<@&" + config.adminRoleId + ">" : "not set"),
     "**Reminder role:** " +
       (config.reminderRoleId ? "<@&" + config.reminderRoleId + ">" : "not set"),
-    "**Schedule:** " +
-      weekdayName(config.weeklyDay) +
-      " at " +
-      config.weeklyTime +
-      " (" +
-      config.timezone +
-      ")",
-    "**Table sizes:** " +
-      config.tableMinSize +
-      " / " +
-      config.tablePreferredSize +
-      " / " +
-      config.tableMaxSize,
-    "**Signup timing:** opens " +
-      config.signupOpenLeadDays +
-      " days before play; locks " +
-      config.signupLockLeadHours +
-      " hours before play; table selection closes at game time.",
-    "**Automation:** " +
-      automationMode(config) +
-      ", GM role sync " +
+    "**Automation:** " + automationMode(config) + ", GM role sync " +
       (config.roleSyncEnabled ? "on" : "paused"),
   ].join("\n");
 }
@@ -449,25 +524,46 @@ async function handleGuildCommand(
     if (clearAdminRole && selectedAdminRoleId) {
       throw new UserFacingError("Choose admin_role or clear_admin_role, not both.");
     }
-    const timezone = stringOption(invocation, "timezone") ?? current?.timezone ?? "America/Denver";
-    const weeklyDay = numberOption(invocation, "weekday") ?? current?.weeklyDay ?? 6;
-    const weeklyTime = stringOption(invocation, "time") ?? current?.weeklyTime ?? "18:30";
+    const timezone =
+      stringOption(invocation, "timezone") ?? current?.timezone ?? NEW_DAWN_CADENCE.timeZone;
+    const weeklyDay =
+      numberOption(invocation, "weekday") ?? current?.weeklyDay ?? NEW_DAWN_CADENCE.game.weekday;
+    const weeklyTime =
+      stringOption(invocation, "time") ?? current?.weeklyTime ?? NEW_DAWN_CADENCE.game.time;
+    const gmSignupDay =
+      numberOption(invocation, "gm_day") ?? current?.gmSignupDay ?? NEW_DAWN_CADENCE.gmSignup.weekday;
+    const gmSignupTime =
+      stringOption(invocation, "gm_time") ?? current?.gmSignupTime ?? NEW_DAWN_CADENCE.gmSignup.time;
+    const playerSignupDay =
+      numberOption(invocation, "player_day") ?? current?.playerSignupDay ?? NEW_DAWN_CADENCE.playerSignup.weekday;
+    const playerSignupTime =
+      stringOption(invocation, "player_time") ?? current?.playerSignupTime ?? NEW_DAWN_CADENCE.playerSignup.time;
+    const tablePublishDay =
+      numberOption(invocation, "tables_day") ?? current?.tablePublishDay ?? NEW_DAWN_CADENCE.tablePublish.weekday;
+    const tablePublishTime =
+      stringOption(invocation, "tables_time") ?? current?.tablePublishTime ?? NEW_DAWN_CADENCE.tablePublish.time;
+    const openSeatingDay =
+      numberOption(invocation, "open_seating_day") ?? current?.openSeatingDay ?? NEW_DAWN_CADENCE.openSeating.weekday;
+    const openSeatingTime =
+      stringOption(invocation, "open_seating_time") ?? current?.openSeatingTime ?? NEW_DAWN_CADENCE.openSeating.time;
+    const eventDurationMinutes =
+      numberOption(invocation, "duration_minutes") ?? current?.eventDurationMinutes ?? 180;
     const tableMinSize = numberOption(invocation, "minimum") ?? current?.tableMinSize ?? 4;
     const tablePreferredSize =
       numberOption(invocation, "preferred") ?? current?.tablePreferredSize ?? 6;
     const tableMaxSize = numberOption(invocation, "maximum") ?? current?.tableMaxSize ?? 6;
-    const signupOpenLeadDays =
-      numberOption(invocation, "signup_lead_days") ?? current?.signupOpenLeadDays ?? 7;
-    const signupLockLeadHours =
-      numberOption(invocation, "lock_lead_hours") ?? current?.signupLockLeadHours ?? 24;
     const errors = [
-      ...validateGuildSchedule({
-        timezone,
-        weeklyDay,
-        weeklyTime,
-        signupOpenLeadDays,
-        signupLockLeadHours,
+      ...validateWeeklyCadence({
+        timeZone: timezone,
+        game: { weekday: weeklyDay, time: weeklyTime },
+        gmSignup: { weekday: gmSignupDay, time: gmSignupTime },
+        playerSignup: { weekday: playerSignupDay, time: playerSignupTime },
+        tablePublish: { weekday: tablePublishDay, time: tablePublishTime },
+        openSeating: { weekday: openSeatingDay, time: openSeatingTime },
       }),
+      ...(!Number.isInteger(eventDurationMinutes) || eventDurationMinutes < 60 || eventDurationMinutes > 720
+        ? ["duration must be a whole number from 60 through 720 minutes"]
+        : []),
       ...validateTablePolicy({
         minimum: tableMinSize,
         preferred: tablePreferredSize,
@@ -494,8 +590,15 @@ async function handleGuildCommand(
       timezone,
       weeklyDay,
       weeklyTime,
-      signupOpenLeadDays,
-      signupLockLeadHours,
+      gmSignupDay,
+      gmSignupTime,
+      playerSignupDay,
+      playerSignupTime,
+      tablePublishDay,
+      tablePublishTime,
+      openSeatingDay,
+      openSeatingTime,
+      eventDurationMinutes,
       tableMinSize,
       tablePreferredSize,
       tableMaxSize,
@@ -1348,6 +1451,7 @@ async function executeDiscordInteraction(
         "🎲 Pong! The guild assistant is awake, " + invokingDisplayName(interaction) + ".",
       );
     }
+    if (command === "help") return ephemeral(helpContent(interaction));
     if (command === "guild") return handleGuildCommand(interaction, env);
     if (command === "week") return handleWeekCommand(interaction, env);
     if (command === "roles") return handleRolesCommand(interaction, env);
@@ -1473,11 +1577,13 @@ export async function handleDiscordInteraction(
 }
 
 export async function handleScheduled(env: Env, now = Date.now()): Promise<void> {
-  const { repository, week, roles, reminders } = services(env);
+  const { repository, discord, week, roles, reminders } = services(env);
+  const rosterNotifications = new RosterNotificationService(repository, discord);
   await runScheduledTick(
     repository,
     {
       openEvent: (event) => week.openExistingEvent(event),
+      openPlayerSignups: (event) => week.openPlayerSignups(event),
       lockAndPlanEvent: async (event) => {
         await week.lockWeek(event.guildId, undefined, event.eventId);
         await week.generatePlan(event.guildId, undefined, event.eventId);
@@ -1490,6 +1596,7 @@ export async function handleScheduled(env: Env, now = Date.now()): Promise<void>
           env, event.eventId, published.bundle.plan.planId,
         );
       },
+      openSeating: (event) => week.openSeating(event),
       syncRoles: async (event) => {
         requireSuccessfulRoleReconciliation(await roles.sync(event.guildId));
       },
@@ -1514,5 +1621,8 @@ export async function handleScheduled(env: Env, now = Date.now()): Promise<void>
     },
     now,
   );
-  await runM6Scheduled(env, now);
+  await Promise.all([
+    rosterNotifications.deliverDue(now),
+    runM6Scheduled(env, now),
+  ]);
 }

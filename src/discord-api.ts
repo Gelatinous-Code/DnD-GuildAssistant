@@ -631,8 +631,12 @@ export interface SignupMessageInput {
   title: string;
   startsAt: DiscordDate;
   signupDeadline?: DiscordDate;
+  playerSignupOpensAt?: DiscordDate;
   description?: string;
   status: "open" | "locked" | "archived";
+  gmSignupEnabled?: boolean;
+  playerSignupEnabled?: boolean;
+  withdrawEnabled?: boolean;
   gmNames?: readonly string[];
   playerNames?: readonly string[];
 }
@@ -640,11 +644,17 @@ export interface SignupMessageInput {
 export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePayload {
   const gmNames = input.gmNames ?? [];
   const playerNames = input.playerNames ?? [];
-  const locked = input.status !== "open";
+  const stageOpen = input.status === "open";
+  const gmSignupEnabled = input.gmSignupEnabled ?? stageOpen;
+  const playerSignupEnabled = input.playerSignupEnabled ?? stageOpen;
+  const withdrawEnabled = input.withdrawEnabled ?? stageOpen;
   const timing = [
     `**When:** ${discordTimestamp(input.startsAt)} (${discordTimestamp(input.startsAt, "R")})`,
+    input.playerSignupOpensAt && !playerSignupEnabled
+      ? `**Player signup opens:** ${discordTimestamp(input.playerSignupOpensAt)} (${discordTimestamp(input.playerSignupOpensAt, "R")})`
+      : undefined,
     input.signupDeadline
-      ? `**Signups close:** ${discordTimestamp(input.signupDeadline)} (${discordTimestamp(input.signupDeadline, "R")})`
+      ? `**Tables publish:** ${discordTimestamp(input.signupDeadline)} (${discordTimestamp(input.signupDeadline, "R")})`
       : undefined,
     `**Status:** ${input.status[0].toUpperCase()}${input.status.slice(1)}`,
   ]
@@ -675,9 +685,16 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
           },
         ],
         footer: {
-          text: locked
-            ? "Signups are closed. An organizer can reopen or adjust them."
-            : "Choose one signup type below. You can change it any time before signups close.",
+          text:
+            input.status === "archived"
+              ? "This week is closed."
+              : gmSignupEnabled && !playerSignupEnabled
+                ? "GM signup is open. Player signup opens at the time shown above."
+                : gmSignupEnabled || playerSignupEnabled
+                  ? "Choose one signup type below. Withdraw if you cannot play this week."
+                  : withdrawEnabled
+                    ? "Tables are published. Withdraw only if you are dropping from this week's games."
+                    : "Signups and withdrawals are closed for this week.",
         },
       },
     ],
@@ -694,7 +711,7 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
                   custom_id: signupCustomId(input.eventId, "gm"),
                   label: "Run a Game",
                   emoji: { name: "🧙" },
-                  disabled: locked,
+                  disabled: !gmSignupEnabled,
                 },
                 {
                   type: ComponentType.Button,
@@ -702,14 +719,14 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
                   custom_id: signupCustomId(input.eventId, "player"),
                   label: "Play",
                   emoji: { name: "⚔️" },
-                  disabled: locked,
+                  disabled: !playerSignupEnabled,
                 },
                 {
                   type: ComponentType.Button,
                   style: ButtonStyle.Secondary,
                   custom_id: signupCustomId(input.eventId, "withdraw"),
                   label: "Withdraw",
-                  disabled: locked,
+                  disabled: !withdrawEnabled,
                 },
               ],
             },
@@ -897,6 +914,8 @@ export interface PublishedTableInput extends TableSummaryInput {
   eventTitle: string;
   startsAt: DiscordDate;
   waitlist?: readonly string[];
+  openSeatingAt?: DiscordDate;
+  openSeating?: boolean;
   closed?: boolean;
 }
 
@@ -931,9 +950,13 @@ export function renderPublishedTable(input: PublishedTableInput): DiscordMessage
         footer: {
           text: input.closed
             ? "Table selection is closed."
+            : input.openSeating
+              ? "Open seating: any active player may claim an available seat."
             : full
               ? "This table is full; Join Waitlist records the next eligible player."
-              : "Join or leave using the buttons below.",
+              : input.openSeatingAt
+                ? `Signup-order reservations apply until ${discordTimestamp(input.openSeatingAt)}.`
+                : "Join or leave using the buttons below.",
         },
       },
     ],

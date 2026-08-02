@@ -785,12 +785,13 @@ function service(
   repository: FakeRepository,
   discord: FakeDiscord,
   ids: string[] = [],
+  now = NOW,
 ): WeekService {
   let counter = 0;
   return new WeekService(
     repository as unknown as GuildRepository,
     discord as unknown as DiscordRestClient,
-    { now: () => NOW, id: () => ids[counter++] ?? "generated-" + counter },
+    { now: () => now, id: () => ids[counter++] ?? "generated-" + counter },
   );
 }
 
@@ -847,7 +848,7 @@ describe("WeekService", () => {
     expect(switched.message).toBe("Signed up to play.");
     expect(repository.signups.get("player-1")?.signupKind).toBe("player");
     expect(repository.signups.get("player-1")?.status).toBe("withdrawn");
-    expect(withdrawn.message).toBe("Signup withdrawn.");
+    expect(withdrawn.message).toBe("You dropped from this week's games.");
     expect(repository.audits.map((item) => item.action)).toEqual([
       "signup.gm",
       "signup.player",
@@ -886,9 +887,62 @@ describe("WeekService", () => {
         displayName: "Late Player",
         action: "player",
       }),
-    ).rejects.toThrow("Signups are locked");
+    ).rejects.toThrow("New signups closed");
     expect(repository.signups.size).toBe(0);
     expect(repository.audits).toHaveLength(0);
+  });
+
+  it("allows a late player to join a published week's global waitlist", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("published", { openSeatingAt: NOW + 60_000 });
+    const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
+    bundle.assignments.push(
+      assignment("late-player", "unassigned", {
+        rosterStatus: "bench",
+        rosterRank: 2,
+      }),
+    );
+    repository.bundles.set("plan-1", bundle);
+
+    const result = await service(
+      repository,
+      new FakeDiscord(),
+      ["late-assignment"],
+    ).changeSignup({
+      guildId: "synthetic-guild",
+      eventId: "event-1",
+      userId: "late-player",
+      displayName: "Late Player",
+      action: "player",
+    });
+
+    expect(result.message).toContain("global waitlist");
+    expect(repository.ensureAssignmentCalls).toHaveLength(1);
+    expect(repository.signups.get("late-player")).toMatchObject({
+      signupKind: "player",
+      status: "active",
+    });
+
+    await expect(
+      service(repository, new FakeDiscord()).changeSignup({
+        guildId: "synthetic-guild",
+        eventId: "event-1",
+        userId: "late-gm",
+        displayName: "Late GM",
+        action: "gm",
+      }),
+    ).rejects.toThrow("GM signup closed");
+
+    await expect(
+      service(repository, new FakeDiscord(), [], STARTS_AT).changeSignup({
+        guildId: "synthetic-guild",
+        eventId: "event-1",
+        userId: "after-game-player",
+        displayName: "After Game Player",
+        action: "player",
+      }),
+    ).rejects.toThrow("New signups closed");
+    expect(repository.signups.has("after-game-player")).toBe(false);
   });
 
   it.each(["gm", "player"] as const)(
@@ -1098,6 +1152,8 @@ describe("WeekService", () => {
           status: "unassigned",
           tableId: null,
           waitlistPosition: null,
+          rosterRank: index + 1,
+          rosterStatus: index < 6 ? "reserved" : "bench",
         }),
       ),
     );
@@ -1110,12 +1166,14 @@ describe("WeekService", () => {
             tableId: null,
             desiredTableId: null,
             waitlistPosition: null,
+            rosterRank: index + 1,
+            rosterStatus: index < 6 ? "reserved" : "bench",
           }),
         ),
       ),
     );
     expect(JSON.stringify(generated.preview)).toContain(
-      "Projected capacity shortfall: 2 players exceed currently planned seats; live table waitlists begin only after selection.",
+      "2 players are on the global waitlist in signup order",
     );
     expect(generated.event.status).toBe("planned");
   });
@@ -1501,6 +1559,83 @@ describe("WeekService", () => {
     ]);
   });
 
+  it("keeps global bench players out until open seating, then allows first-come selection", async () => {
+    const repository = new FakeRepository();
+    const openSeatingAt = NOW + 60 * 60_000;
+    repository.event = weeklyEvent("published", { openSeatingAt });
+    const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
+    bundle.assignments.push(
+      assignment("bench-player", "unassigned", {
+        rosterStatus: "bench",
+        rosterRank: 7,
+      }),
+    );
+    repository.bundles.set("plan-1", bundle);
+
+    await expect(
+      service(repository, new FakeDiscord()).selectTable({
+        guildId: "synthetic-guild",
+        planId: "plan-1",
+        tableId: "table-1",
+        userId: "bench-player",
+        action: "join",
+      }),
+    ).rejects.toThrow("global waitlist");
+    expect(repository.joinCalls).toHaveLength(0);
+
+    await expect(
+      service(
+        repository,
+        new FakeDiscord(),
+        [],
+        openSeatingAt,
+      ).selectTable({
+        guildId: "synthetic-guild",
+        planId: "plan-1",
+        tableId: "table-1",
+        userId: "bench-player",
+        action: "join",
+      }),
+    ).resolves.toMatchObject({ message: "You joined this table." });
+    expect(repository.joinCalls).toHaveLength(1);
+  });
+
+  it("opens GM signup before player interest", async () => {
+    const repository = new FakeRepository();
+    const playerSignupOpensAt = NOW + 60 * 60_000;
+    repository.event = weeklyEvent("open", { playerSignupOpensAt });
+
+    await expect(
+      service(repository, new FakeDiscord()).changeSignup({
+        guildId: "synthetic-guild",
+        eventId: "event-1",
+        userId: "player-1",
+        displayName: "Player One",
+        action: "player",
+      }),
+    ).rejects.toThrow("Player signup opens");
+
+    await expect(
+      service(repository, new FakeDiscord()).changeSignup({
+        guildId: "synthetic-guild",
+        eventId: "event-1",
+        userId: "gm-1",
+        displayName: "GM One",
+        action: "gm",
+      }),
+    ).resolves.toMatchObject({ message: "Signed up to run a game." });
+
+    await expect(
+      service(repository, new FakeDiscord(), [], playerSignupOpensAt).changeSignup({
+        guildId: "synthetic-guild",
+        eventId: "event-1",
+        userId: "player-1",
+        displayName: "Player One",
+        action: "player",
+      }),
+    ).resolves.toMatchObject({ message: "Signed up to play." });
+  });
+
   it("rejects a table interaction replayed from a different guild", async () => {
     const repository = new FakeRepository();
     repository.event = weeklyEvent("published");
@@ -1874,7 +2009,8 @@ describe("WeekService", () => {
     expect(status).toContain("1 GMs / 1 players");
     expect(status).toContain("draft revision 1");
     expect(status).toContain("Saturday at 18:30");
-    expect(status).toContain("opens 7 days before; locks 24 hours before");
+    expect(status).toContain("**GM signup:** Wednesday at 17:00");
+    expect(status).toContain("**Open seating:** Monday at 17:00");
     expect(status).toContain("auto-publish off");
     expect(status).toContain("**Event ID:** event-1");
     expect(status).not.toContain("undefined");

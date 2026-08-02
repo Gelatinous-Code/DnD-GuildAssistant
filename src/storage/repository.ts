@@ -19,6 +19,8 @@ export type SignupStatus = "active" | "withdrawn";
 export type SignupSource = "native" | "raid_helper" | "import" | "admin";
 export type PlanStatus = "draft" | "published" | "superseded";
 export type AssignmentStatus = "unassigned" | "assigned" | "waitlisted" | "withdrawn";
+export type RosterStatus = "reserved" | "bench";
+export type RosterNotificationStatus = "pending" | "sending" | "retry" | "sent" | "blocked" | "failed";
 export type ReminderTrigger = "signup_open" | "signup_lock" | "event_start";
 export type ReminderAudience =
   | "configured_role"
@@ -46,6 +48,14 @@ export interface GuildConfig {
   weeklyDay: number;
   weeklyWeekday?: number;
   weeklyTime: string;
+  gmSignupDay?: number | null;
+  gmSignupTime?: string | null;
+  playerSignupDay?: number | null;
+  playerSignupTime?: string | null;
+  tablePublishDay?: number | null;
+  tablePublishTime?: string | null;
+  openSeatingDay?: number | null;
+  openSeatingTime?: string | null;
   eventDurationMinutes: number;
   signupOpenLeadDays: number;
   signupLeadDays?: number;
@@ -77,6 +87,14 @@ export interface GuildConfigPatch {
   weeklyDay?: number;
   weeklyWeekday?: number;
   weeklyTime?: string;
+  gmSignupDay?: number;
+  gmSignupTime?: string;
+  playerSignupDay?: number;
+  playerSignupTime?: string;
+  tablePublishDay?: number;
+  tablePublishTime?: string;
+  openSeatingDay?: number;
+  openSeatingTime?: string;
   eventDurationMinutes?: number;
   signupOpenLeadDays?: number;
   signupLeadDays?: number;
@@ -100,7 +118,9 @@ export interface WeeklyEvent {
   startsAt: number;
   endsAt: number | null;
   signupOpensAt: number;
+  playerSignupOpensAt?: number;
   signupLocksAt: number;
+  openSeatingAt?: number;
   tableSelectionClosesAt: number;
   reminderAt?: number | null;
   status: EventStatus;
@@ -130,7 +150,9 @@ export interface CreateWeeklyEventInput {
   startsAt: number;
   endsAt?: number;
   signupOpensAt: number;
+  playerSignupOpensAt?: number;
   signupLocksAt: number;
+  openSeatingAt?: number;
   tableSelectionClosesAt?: number;
   reminderAt?: number;
   status?: EventStatus;
@@ -209,6 +231,9 @@ export interface Assignment {
   waitlistPosition: number | null;
   assignedAt: number | null;
   updatedAt: number;
+  rosterStatus?: RosterStatus | null;
+  rosterRank?: number | null;
+  rosterPromotedAt?: number | null;
 }
 
 export interface SaveDraftPlanInput {
@@ -250,8 +275,28 @@ export interface LeaveTableResult {
   left: boolean;
   assignment: Assignment | null;
   promoted: Assignment | null;
+  rosterPromoted?: Assignment | null;
 }
 
+export interface RosterPromotionNotification {
+  assignmentId: string;
+  guildId: string;
+  eventId: string;
+  planId: string;
+  recipientUserId: string;
+  displayName: string;
+  eventTitle: string;
+  openSeatingAt: number;
+  eventStartsAt: number;
+  attemptCount: number;
+}
+
+export interface RosterNotificationDeliveryResult {
+  assignmentId: string;
+  status: "sent" | "retry" | "blocked" | "failed";
+  nextAttemptAt?: number | null;
+  error?: string;
+}
 export class TableSelectionUnavailableError extends Error {
   constructor() {
     super("Table selection is closed or the published plan changed");
@@ -377,6 +422,14 @@ type GuildConfigRow = {
   event_duration_minutes: number;
   signup_open_lead_days: number;
   signup_lock_lead_hours: number;
+  gm_signup_day: number | null;
+  gm_signup_time: string | null;
+  player_signup_day: number | null;
+  player_signup_time: string | null;
+  table_publish_day: number | null;
+  table_publish_time: string | null;
+  open_seating_day: number | null;
+  open_seating_time: string | null;
   table_min_size: number;
   table_preferred_size: number;
   table_max_size: number;
@@ -394,7 +447,9 @@ type WeeklyEventRow = {
   starts_at: number;
   ends_at: number | null;
   signup_opens_at: number;
+  player_signup_opens_at: number | null;
   signup_locks_at: number;
+  open_seating_at: number | null;
   table_selection_closes_at: number | null;
   reminder_at: number | null;
   status: EventStatus;
@@ -471,6 +526,17 @@ type AssignmentRow = {
   status: AssignmentStatus;
   waitlist_position: number | null;
   assigned_at: number | null;
+  roster_status: RosterStatus | null;
+  roster_rank: number | null;
+  roster_promoted_at: number | null;
+  roster_notification_status: RosterNotificationStatus | null;
+  roster_notification_attempt_count: number;
+  roster_notification_next_attempt_at: number | null;
+  roster_notification_claimed_at: number | null;
+  roster_notification_last_error: string | null;
+  roster_notification_channel_id: string | null;
+  roster_notification_message_id: string | null;
+  roster_notification_sent_at: number | null;
   updated_at: number;
 };
 
@@ -588,6 +654,14 @@ function guildConfigFromRow(row: GuildConfigRow): GuildConfig {
     tableMinSize: row.table_min_size,
     minPlayersPerTable: row.table_min_size,
     tablePreferredSize: row.table_preferred_size,
+    gmSignupDay: row.gm_signup_day,
+    gmSignupTime: row.gm_signup_time,
+    playerSignupDay: row.player_signup_day,
+    playerSignupTime: row.player_signup_time,
+    tablePublishDay: row.table_publish_day,
+    tablePublishTime: row.table_publish_time,
+    openSeatingDay: row.open_seating_day,
+    openSeatingTime: row.open_seating_time,
     preferredPlayersPerTable: row.table_preferred_size,
     tableMaxSize: row.table_max_size,
     maxPlayersPerTable: row.table_max_size,
@@ -607,7 +681,9 @@ function eventFromRow(row: WeeklyEventRow): WeeklyEvent {
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     signupOpensAt: row.signup_opens_at,
+    playerSignupOpensAt: row.player_signup_opens_at ?? row.signup_opens_at,
     signupLocksAt: row.signup_locks_at,
+    openSeatingAt: row.open_seating_at ?? row.signup_locks_at,
     tableSelectionClosesAt: row.table_selection_closes_at ?? row.starts_at,
     reminderAt: row.reminder_at,
     status: row.status,
@@ -692,6 +768,9 @@ function assignmentFromRow(row: AssignmentRow): Assignment {
     status: row.status,
     waitlistPosition: row.waitlist_position,
     assignedAt: row.assigned_at,
+    rosterStatus: row.roster_status,
+    rosterRank: row.roster_rank,
+    rosterPromotedAt: row.roster_promoted_at,
     updatedAt: row.updated_at,
   };
 }
@@ -817,6 +896,14 @@ export class GuildRepository {
              table_max_size = COALESCE(?, table_max_size),
              scheduling_enabled = COALESCE(?, scheduling_enabled),
              role_sync_enabled = COALESCE(?, role_sync_enabled),
+             gm_signup_day = COALESCE(?, gm_signup_day),
+             gm_signup_time = COALESCE(?, gm_signup_time),
+             player_signup_day = COALESCE(?, player_signup_day),
+             player_signup_time = COALESCE(?, player_signup_time),
+             table_publish_day = COALESCE(?, table_publish_day),
+             table_publish_time = COALESCE(?, table_publish_time),
+             open_seating_day = COALESCE(?, open_seating_day),
+             open_seating_time = COALESCE(?, open_seating_time),
              auto_publish_enabled = COALESCE(?, auto_publish_enabled),
              updated_at = ?
            WHERE guild_id = ?`,
@@ -842,6 +929,14 @@ export class GuildRepository {
           asNullable(input.maxPlayersPerTable ?? input.tableMaxSize),
           input.schedulingEnabled === undefined ? null : Number(input.schedulingEnabled),
           input.roleSyncEnabled === undefined ? null : Number(input.roleSyncEnabled),
+          asNullable(input.gmSignupDay),
+          asNullable(input.gmSignupTime),
+          asNullable(input.playerSignupDay),
+          asNullable(input.playerSignupTime),
+          asNullable(input.tablePublishDay),
+          asNullable(input.tablePublishTime),
+          asNullable(input.openSeatingDay),
+          asNullable(input.openSeatingTime),
           input.autoPublishEnabled === undefined ? null : Number(input.autoPublishEnabled),
           now,
           input.guildId,
@@ -858,9 +953,10 @@ export class GuildRepository {
       .prepare(
         `INSERT INTO weekly_events (
            event_id, guild_id, title, starts_at, ends_at, signup_opens_at,
-           signup_locks_at, table_selection_closes_at, reminder_at, status, source, source_external_id,
+           player_signup_opens_at, signup_locks_at, open_seating_at,
+           table_selection_closes_at, reminder_at, status, source, source_external_id,
            created_by_user_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         input.eventId,
@@ -869,7 +965,9 @@ export class GuildRepository {
         input.startsAt,
         asNullable(input.endsAt),
         input.signupOpensAt,
+        input.playerSignupOpensAt ?? input.signupOpensAt,
         input.signupLocksAt,
+        input.openSeatingAt ?? input.signupLocksAt,
         input.tableSelectionClosesAt ?? input.startsAt,
         asNullable(input.reminderAt),
         input.status ?? "draft",
@@ -1414,6 +1512,8 @@ export class GuildRepository {
           displayName: assignment.displayName,
           status: assignment.status,
           waitlistPosition: assignment.waitlistPosition,
+          rosterStatus: assignment.rosterStatus ?? null,
+          rosterRank: assignment.rosterRank ?? null,
           assignedAt:
             assignment.status === "assigned" ? assignment.assignedAt ?? now : null,
         })),
@@ -1423,7 +1523,8 @@ export class GuildRepository {
           .prepare(
             `INSERT INTO assignments (
                assignment_id, plan_id, table_id, desired_table_id, user_id,
-               display_name, status, waitlist_position, assigned_at, updated_at
+               display_name, status, waitlist_position, roster_status,
+               roster_rank, assigned_at, updated_at
              )
              SELECT
                json_extract(value, '$.assignmentId'), ?,
@@ -1433,6 +1534,8 @@ export class GuildRepository {
                json_extract(value, '$.displayName'),
                json_extract(value, '$.status'),
                json_extract(value, '$.waitlistPosition'),
+               json_extract(value, '$.rosterStatus'),
+               json_extract(value, '$.rosterRank'),
                json_extract(value, '$.assignedAt'), ?
              FROM json_each(?)`,
           )
@@ -1646,6 +1749,135 @@ export class GuildRepository {
     return results[1]?.meta.changes === 1;
   }
 
+  async listDueRosterPromotionNotifications(
+    now: number,
+    limit = 25,
+  ): Promise<RosterPromotionNotification[]> {
+    const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+    const staleBefore = now - DEFAULT_REMINDER_LEASE_MS;
+    const result = await this.db
+      .prepare(
+        `SELECT assignment.assignment_id, event.guild_id, event.event_id,
+           plan.plan_id, assignment.user_id, assignment.display_name,
+           event.title, COALESCE(event.open_seating_at, event.signup_locks_at)
+             AS open_seating_at,
+           event.starts_at, assignment.roster_notification_attempt_count
+         FROM assignments assignment
+         JOIN plans plan ON plan.plan_id = assignment.plan_id
+         JOIN weekly_events event ON event.event_id = plan.event_id
+         WHERE assignment.roster_status = 'reserved'
+           AND assignment.roster_promoted_at IS NOT NULL
+           AND assignment.status <> 'withdrawn'
+           AND event.status = 'published'
+           AND (
+             assignment.roster_notification_status IN ('pending', 'retry')
+             AND COALESCE(assignment.roster_notification_next_attempt_at, 0) <= ?
+             OR assignment.roster_notification_status = 'sending'
+             AND COALESCE(assignment.roster_notification_claimed_at, 0) <= ?
+           )
+         ORDER BY assignment.roster_promoted_at ASC, assignment.assignment_id ASC
+         LIMIT ?`,
+      )
+      .bind(now, staleBefore, boundedLimit)
+      .all<{
+        assignment_id: string;
+        guild_id: string;
+        event_id: string;
+        plan_id: string;
+        user_id: string;
+        display_name: string;
+        title: string;
+        open_seating_at: number;
+        starts_at: number;
+        roster_notification_attempt_count: number;
+      }>();
+    return result.results.map((row) => ({
+      assignmentId: row.assignment_id,
+      guildId: row.guild_id,
+      eventId: row.event_id,
+      planId: row.plan_id,
+      recipientUserId: row.user_id,
+      displayName: row.display_name,
+      eventTitle: row.title,
+      openSeatingAt: row.open_seating_at,
+      eventStartsAt: row.starts_at,
+      attemptCount: row.roster_notification_attempt_count,
+    }));
+  }
+
+  async claimRosterPromotionNotification(
+    assignmentId: string,
+    now: number,
+  ): Promise<boolean> {
+    const staleBefore = now - DEFAULT_REMINDER_LEASE_MS;
+    const result = await this.db
+      .prepare(
+        `UPDATE assignments SET
+           roster_notification_status = 'sending',
+           roster_notification_attempt_count = roster_notification_attempt_count + 1,
+           roster_notification_claimed_at = ?, updated_at = ?
+         WHERE assignment_id = ? AND (
+           roster_notification_status IN ('pending', 'retry')
+             AND COALESCE(roster_notification_next_attempt_at, 0) <= ?
+           OR roster_notification_status = 'sending'
+             AND COALESCE(roster_notification_claimed_at, 0) <= ?
+         )`,
+      )
+      .bind(now, now, assignmentId, now, staleBefore)
+      .run();
+    return result.meta.changes === 1;
+  }
+
+  async markRosterPromotionNotificationSent(
+    assignmentId: string,
+    channelId: string,
+    messageId: string,
+    now: number,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `UPDATE assignments SET
+           roster_notification_status = 'sent',
+           roster_notification_next_attempt_at = NULL,
+           roster_notification_claimed_at = NULL,
+           roster_notification_last_error = NULL,
+           roster_notification_channel_id = ?,
+           roster_notification_message_id = ?,
+           roster_notification_sent_at = ?, updated_at = ?
+         WHERE assignment_id = ? AND roster_notification_status = 'sending'`,
+      )
+      .bind(channelId, messageId, now, now, assignmentId)
+      .run();
+    return result.meta.changes === 1;
+  }
+
+  async markRosterPromotionNotificationFailure(
+    result: RosterNotificationDeliveryResult,
+    now: number,
+  ): Promise<boolean> {
+    if (result.status === "sent") {
+      throw new TypeError("Use markRosterPromotionNotificationSent for sent delivery");
+    }
+    const update = await this.db
+      .prepare(
+        `UPDATE assignments SET
+           roster_notification_status = ?,
+           roster_notification_next_attempt_at = ?,
+           roster_notification_claimed_at = NULL,
+           roster_notification_last_error = ?, updated_at = ?
+         WHERE assignment_id = ? AND roster_notification_status = 'sending'`,
+      )
+      .bind(
+        result.status,
+        result.nextAttemptAt ?? null,
+        (result.error ?? "Roster promotion delivery failed").slice(0, 500),
+        now,
+        result.assignmentId,
+      )
+      .run();
+    return update.meta.changes === 1;
+  }
+
   async getAssignment(planId: string, userId: string): Promise<Assignment | null> {
     const row = await this.db
       .prepare("SELECT * FROM assignments WHERE plan_id = ? AND user_id = ?")
@@ -1666,9 +1898,18 @@ export class GuildRepository {
         .prepare(
           `INSERT OR IGNORE INTO assignments (
              assignment_id, plan_id, table_id, desired_table_id, user_id,
-             display_name, status, waitlist_position, assigned_at, updated_at
+             display_name, status, waitlist_position, roster_status, roster_rank,
+             assigned_at, updated_at
            )
-           SELECT ?, ?, NULL, NULL, ?, ?, 'unassigned', NULL, NULL, ?
+           SELECT ?, ?, NULL, NULL, ?, ?, 'unassigned', NULL,
+             CASE WHEN (
+               SELECT COUNT(*) FROM assignments reserved
+               WHERE reserved.plan_id = ? AND reserved.roster_status = 'reserved'
+                 AND reserved.status <> 'withdrawn'
+             ) < COALESCE((SELECT SUM(capacity) FROM plan_tables WHERE plan_id = ?), 0)
+               THEN 'reserved' ELSE 'bench' END,
+             COALESCE((SELECT MAX(roster_rank) FROM assignments WHERE plan_id = ?), 0) + 1,
+             NULL, ?
            FROM plans plan
            JOIN signups signup
              ON signup.event_id = plan.event_id AND signup.user_id = ?
@@ -1680,6 +1921,9 @@ export class GuildRepository {
           input.planId,
           input.userId,
           input.displayName,
+          input.planId,
+          input.planId,
+          input.planId,
           now,
           input.userId,
           input.planId,
@@ -1693,6 +1937,30 @@ export class GuildRepository {
              status = CASE WHEN status = 'withdrawn' THEN 'unassigned' ELSE status END,
              waitlist_position = CASE WHEN status = 'withdrawn' THEN NULL ELSE waitlist_position END,
              assigned_at = CASE WHEN status = 'withdrawn' THEN NULL ELSE assigned_at END,
+             roster_status = CASE WHEN status = 'withdrawn' THEN
+               CASE WHEN (
+                 SELECT COUNT(*) FROM assignments reserved
+                 WHERE reserved.plan_id = assignments.plan_id
+                   AND reserved.roster_status = 'reserved'
+                   AND reserved.status <> 'withdrawn'
+               ) < COALESCE((SELECT SUM(capacity) FROM plan_tables
+                 WHERE plan_id = assignments.plan_id), 0)
+                 THEN 'reserved' ELSE 'bench' END
+               ELSE roster_status END,
+             roster_rank = CASE WHEN status = 'withdrawn' THEN
+               COALESCE((SELECT MAX(candidate.roster_rank) FROM assignments candidate
+                 WHERE candidate.plan_id = assignments.plan_id), 0) + 1
+               ELSE roster_rank END,
+             roster_promoted_at = CASE WHEN status = 'withdrawn' THEN NULL ELSE roster_promoted_at END,
+             roster_notification_status = CASE WHEN status = 'withdrawn' THEN NULL ELSE roster_notification_status END,
+             roster_notification_attempt_count = CASE WHEN status = 'withdrawn' THEN 0 ELSE roster_notification_attempt_count END,
+             roster_notification_next_attempt_at = CASE WHEN status = 'withdrawn' THEN NULL ELSE roster_notification_next_attempt_at END,
+             roster_notification_claimed_at = CASE WHEN status = 'withdrawn' THEN NULL ELSE roster_notification_claimed_at END,
+             roster_notification_last_error = CASE WHEN status = 'withdrawn' THEN NULL ELSE roster_notification_last_error END,
+             roster_notification_channel_id = CASE WHEN status = 'withdrawn' THEN NULL ELSE roster_notification_channel_id END,
+             roster_notification_message_id = CASE WHEN status = 'withdrawn' THEN NULL ELSE roster_notification_message_id END,
+             roster_notification_sent_at = CASE WHEN status = 'withdrawn' THEN NULL ELSE roster_notification_sent_at END,
+             withdrawal_token = CASE WHEN status = 'withdrawn' THEN NULL ELSE withdrawal_token END,
              updated_at = ?
            WHERE plan_id = ? AND user_id = ? AND EXISTS (
              SELECT 1
@@ -1722,6 +1990,56 @@ export class GuildRepository {
     return assignment;
   }
 
+  private async getNextRosterBench(planId: string): Promise<Assignment | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT * FROM assignments
+         WHERE plan_id = ? AND roster_status = 'bench' AND status <> 'withdrawn'
+         ORDER BY roster_rank ASC, user_id ASC LIMIT 1`,
+      )
+      .bind(planId)
+      .first<AssignmentRow>();
+    return row ? assignmentFromRow(row) : null;
+  }
+
+  private promoteNextRosterStatement(
+    planId: string,
+    now: number,
+    enabled: boolean,
+    withdrawalUserId: string,
+    withdrawalToken: string,
+  ): D1PreparedStatement {
+    return this.db
+      .prepare(
+        `UPDATE assignments SET
+           roster_status = 'reserved', roster_promoted_at = ?,
+           roster_notification_status = 'pending',
+           roster_notification_attempt_count = 0,
+           roster_notification_next_attempt_at = ?,
+           roster_notification_claimed_at = NULL,
+           roster_notification_last_error = NULL,
+           roster_notification_channel_id = NULL,
+           roster_notification_message_id = NULL,
+           roster_notification_sent_at = NULL,
+           updated_at = ?
+         WHERE ? = 1 AND EXISTS (
+           SELECT 1 FROM assignments withdrawal
+           WHERE withdrawal.plan_id = ? AND withdrawal.user_id = ?
+             AND withdrawal.status = 'withdrawn'
+             AND withdrawal.withdrawal_token = ?
+         ) AND assignment_id = (
+           SELECT candidate.assignment_id FROM assignments candidate
+           WHERE candidate.plan_id = ? AND candidate.roster_status = 'bench'
+             AND candidate.status <> 'withdrawn'
+           ORDER BY candidate.roster_rank ASC, candidate.user_id ASC LIMIT 1
+         )`,
+      )
+      .bind(
+        now, now, now, Number(enabled),
+        planId, withdrawalUserId, withdrawalToken, planId,
+      );
+  }
+
   private async getNextWaitlisted(
     planId: string,
     tableId: string | null,
@@ -1742,13 +2060,19 @@ export class GuildRepository {
     planId: string,
     tableId: string | null,
     now: number,
+    withdrawalGuard?: { userId: string; token: string },
   ): D1PreparedStatement {
     return this.db
       .prepare(
         `UPDATE assignments SET
            table_id = desired_table_id, status = 'assigned',
            waitlist_position = NULL, assigned_at = ?, updated_at = ?
-         WHERE assignment_id = (
+         WHERE (? IS NULL OR EXISTS (
+           SELECT 1 FROM assignments withdrawal
+           WHERE withdrawal.plan_id = ? AND withdrawal.user_id = ?
+             AND withdrawal.status = 'withdrawn'
+             AND withdrawal.withdrawal_token = ?
+         )) AND assignment_id = (
            SELECT candidate.assignment_id
            FROM assignments candidate
            JOIN plan_tables target ON target.table_id = candidate.desired_table_id
@@ -1763,7 +2087,16 @@ export class GuildRepository {
            LIMIT 1
          )`,
       )
-      .bind(now, now, planId, tableId);
+      .bind(
+        now,
+        now,
+        withdrawalGuard?.token ?? null,
+        planId,
+        withdrawalGuard?.userId ?? "",
+        withdrawalGuard?.token ?? "",
+        planId,
+        tableId,
+      );
   }
 
   async joinOrWaitlist(
@@ -1913,6 +2246,7 @@ export class GuildRepository {
   async withdrawAssignmentAndPromote(
     planId: string,
     userId: string,
+    promoteRoster = true,
   ): Promise<LeaveTableResult> {
     const before = await this.getAssignment(planId, userId);
     if (!before || before.status === "withdrawn") {
@@ -1920,35 +2254,68 @@ export class GuildRepository {
     }
     const vacatedTableId = before.status === "assigned" ? before.tableId : null;
     const promotionCandidate = await this.getNextWaitlisted(planId, vacatedTableId);
+    const shouldPromoteRoster = promoteRoster && before.rosterStatus === "reserved";
+    const rosterPromotionCandidate = shouldPromoteRoster
+      ? await this.getNextRosterBench(planId)
+      : null;
     const now = this.now();
+    const withdrawalToken = crypto.randomUUID();
     const results = await this.db.batch([
       this.db
         .prepare(
           `UPDATE assignments SET
              table_id = NULL, desired_table_id = NULL, status = 'withdrawn',
-             waitlist_position = NULL, assigned_at = NULL, updated_at = ?
+             waitlist_position = NULL, assigned_at = NULL,
+             withdrawal_token = ?, updated_at = ?
            WHERE plan_id = ? AND user_id = ? AND status <> 'withdrawn'`,
         )
-        .bind(now, planId, userId),
+        .bind(withdrawalToken, now, planId, userId),
       this.db
         .prepare(
           `UPDATE weekly_events SET
              table_state_version = table_state_version + 1,
              updated_at = ?
            WHERE event_id = (SELECT event_id FROM plans WHERE plan_id = ?)
-             AND changes() = 1`,
+             AND EXISTS (
+               SELECT 1 FROM assignments withdrawal
+               WHERE withdrawal.plan_id = ? AND withdrawal.user_id = ?
+                 AND withdrawal.status = 'withdrawn'
+                 AND withdrawal.withdrawal_token = ?
+             )`,
         )
-        .bind(now, planId),
-      this.promoteNextStatement(planId, vacatedTableId, now),
+        .bind(now, planId, planId, userId, withdrawalToken),
+      this.promoteNextStatement(planId, vacatedTableId, now, {
+        userId,
+        token: withdrawalToken,
+      }),
+      this.promoteNextRosterStatement(
+        planId,
+        now,
+        shouldPromoteRoster,
+        userId,
+        withdrawalToken,
+      ),
     ]);
     const assignment = await this.getAssignment(planId, userId);
     const promoted = promotionCandidate
       ? await this.getAssignment(planId, promotionCandidate.userId)
       : null;
+    const rosterPromoted = rosterPromotionCandidate
+      ? await this.getAssignment(planId, rosterPromotionCandidate.userId)
+      : null;
     return {
       left: results[0]?.meta.changes === 1,
       assignment,
-      promoted: promoted?.status === "assigned" ? promoted : null,
+      promoted:
+        results[2]?.meta.changes === 1 && promoted?.status === "assigned"
+          ? promoted
+          : null,
+      rosterPromoted:
+        results[3]?.meta.changes === 1 &&
+        rosterPromoted?.rosterStatus === "reserved" &&
+        rosterPromoted.rosterPromotedAt === now
+          ? rosterPromoted
+          : null,
     };
   }
 

@@ -8,7 +8,7 @@ completion, token, seating, and notification records.
 
 This is a feature-operations guide, not a deployment checklist. Complete the
 [first deployment](first-deployment.md) or the update procedure in the
-[operations guide](operations.md#deploy-an-update-to-an-existing-worker) first.
+[operations guide](operations.md#deploy-an-update) first.
 
 Before testing DM rewards, verify that the remote migration list is empty, the
 compatible Worker is deployed, `/ping` responds, and `/guild doctor` has no

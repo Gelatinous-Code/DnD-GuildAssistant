@@ -3,12 +3,40 @@ import { m6Commands } from "./m6-commands.mjs";
 // MVP destinations are normal text and announcement channels. Threads and
 // forum/media parents require additional lifecycle and permission semantics.
 const channelTypes = [0, 5];
+const weekdayChoices = [
+  { name: "Monday", value: 1 },
+  { name: "Tuesday", value: 2 },
+  { name: "Wednesday", value: 3 },
+  { name: "Thursday", value: 4 },
+  { name: "Friday", value: 5 },
+  { name: "Saturday", value: 6 },
+  { name: "Sunday", value: 7 },
+];
+
 
 export const commands = [
   {
     name: "ping",
     description: "Check whether the New Dawn Guild Assistant is awake.",
     type: 1,
+  },
+  {
+    name: "help",
+    description: "Show a private guide for players, GMs, priority, or organizers.",
+    type: 1,
+    options: [
+      {
+        type: 3,
+        name: "topic",
+        description: "Choose the part of the weekly flow you want explained.",
+        choices: [
+          { name: "Playing this week", value: "player" },
+          { name: "Running a game", value: "gm" },
+          { name: "DM priority tokens", value: "priority" },
+          { name: "Organizing the server", value: "organizer" },
+        ],
+      },
+    ],
   },
   {
     name: "guild",
@@ -89,17 +117,54 @@ export const commands = [
           },
           {
             type: 4,
-            name: "signup_lead_days",
-            description: "Days before game time to open signups.",
-            min_value: 1,
-            max_value: 7,
+            name: "gm_day",
+            description: "Local weekday when GM signup opens.",
+            choices: weekdayChoices,
+          },
+          {
+            type: 3,
+            name: "gm_time",
+            description: "Local GM signup time in 24-hour HH:mm format.",
           },
           {
             type: 4,
-            name: "lock_lead_hours",
-            description: "Hours before game time to lock signups.",
-            min_value: 1,
-            max_value: 168,
+            name: "player_day",
+            description: "Local weekday when player interest opens.",
+            choices: weekdayChoices,
+          },
+          {
+            type: 3,
+            name: "player_time",
+            description: "Local player signup time in 24-hour HH:mm format.",
+          },
+          {
+            type: 4,
+            name: "tables_day",
+            description: "Local weekday when tables publish.",
+            choices: weekdayChoices,
+          },
+          {
+            type: 3,
+            name: "tables_time",
+            description: "Local table publication time in 24-hour HH:mm format.",
+          },
+          {
+            type: 4,
+            name: "open_seating_day",
+            description: "Local weekday when remaining seats become first-come.",
+            choices: weekdayChoices,
+          },
+          {
+            type: 3,
+            name: "open_seating_time",
+            description: "Local open-seating time in 24-hour HH:mm format.",
+          },
+          {
+            type: 4,
+            name: "duration_minutes",
+            description: "Game duration in minutes; New Dawn uses 180.",
+            min_value: 60,
+            max_value: 720,
           },
           {
             type: 5,
