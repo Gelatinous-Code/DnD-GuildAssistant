@@ -1,5 +1,10 @@
 # Test-guild go-live pilot
 
+**Audience: release testers with Discord, repository, and Cloudflare access.**
+This is not a player guide or a normal weekly organizer checklist. Players use
+the [player and GM guide](player-guide.md); organizers use the
+[organizer guide](organizer-guide.md).
+
 This is an acceptance checklist, not a deployment guide. Begin only after the
 release candidate has been migrated and deployed, the Discord endpoint is
 verified, and `/ping` works in a disposable server. Use the
@@ -15,9 +20,10 @@ Merging changes source control only; it does not migrate D1 or deploy the Worker
 
 This is not a 10-minute smoke test. The manual M6 token path needs one completed
 source event and two target events. The scheduled-mode checks add two more test
-events. Events last four hours, and the source DM cannot receive priority tokens
-until the source event has ended. Expect about 60–90 minutes of hands-on work
-spread over at least seven elapsed hours. It is reasonable to split the pilot
+events. Use `duration_minutes:60` for disposable pilot events unless a test says
+otherwise. The source DM cannot receive priority tokens until the source event
+has ended. Expect about 60–90 minutes of hands-on work spread over several
+elapsed hours. It is reasonable to split the pilot
 across a day or several test sessions.
 
 One **pilot lead** needs the repository checkout, Cloudflare access, Wrangler
@@ -53,7 +59,7 @@ Stop and repair the installation if any required check fails:
       been applied.
 - [ ] Run `/ping` in the disposable server.
 - [ ] Run `/guild setup` with no options and confirm the intended test channel,
-      schedule, signup window, and table policy.
+      five-stage schedule and table policy.
 - [ ] Explicitly pause scheduled lifecycle work:
 
       `/guild automation mode:Paused confirm:True`
@@ -67,7 +73,7 @@ Use this exact table policy so three people can prove capacity and waitlist
 behavior:
 
 ```text
-/guild setup minimum:1 preferred:1 maximum:1
+/guild setup minimum:1 preferred:1 maximum:1 duration_minutes:60
 ```
 
 Run `/guild setup` again and verify the saved values. Never use this reduced
@@ -80,12 +86,12 @@ Sections 5 and 6 turn scheduling back on at controlled times.
 ## Create a safe near-future start time
 
 Before each manual `/week open`, run this in PowerShell. The first value is 20
-minutes from now; the second is the fixed four-hour event end:
+minutes from now; the second is the configured one-hour pilot event end:
 
 ```powershell
 $pilotEventStart = (Get-Date).ToUniversalTime().AddMinutes(20)
 $pilotEventStart.ToString("yyyy-MM-ddTHH:mm:ssZ")
-$pilotEventStart.AddHours(4).ToString("yyyy-MM-ddTHH:mm:ssZ")
+$pilotEventStart.AddHours(1).ToString("yyyy-MM-ddTHH:mm:ssZ")
 ```
 
 Use the first value as `starts_at`. Keep the second value so you know when
@@ -128,7 +134,7 @@ than expected before `/week open`, generate fresh values.
 
 ### 2. Confirm the source session and award Member A
 
-- [ ] Wait until the second PowerShell helper value—the source event's four-hour
+- [ ] Wait until the second PowerShell helper value—the source event's configured
       end. `/session` intentionally refuses an event that has not ended.
 - [ ] Run `/session status table_number:1`. Confirm it identifies the expected
       source event, plan, and table and says there are no attendance deviations
@@ -209,11 +215,27 @@ than expected before `/week open`, generate fresh values.
 
 ### 5. Prove Review before publish
 
-- [ ] Confirm no event is active, then choose a local game time two to three
-      hours in the future. In the guild's IANA time zone, save that weekday and
-      `HH:mm` time with a short test window:
+- [ ] Confirm no event is active. Choose one local weekday and five future times
+      on that day, each at least one 15-minute Cron interval apart, in this
+      order: GM signup, player signup, tables, open seating, game. Leave at
+      least 45 minutes between tables and open seating so the global-waitlist
+      checks below can be completed. Keep the game two to three hours away.
+      Save the accelerated sequence:
 
-      `/guild setup timezone:<IANA-zone> weekday:<day> time:<HH:mm> signup_lead_days:1 lock_lead_hours:1`
+      ```text
+      /guild setup
+        timezone:<IANA-zone>
+        gm_day:<day> gm_time:<first-HH:mm>
+        player_day:<day> player_time:<second-HH:mm>
+        tables_day:<day> tables_time:<third-HH:mm>
+        open_seating_day:<day> open_seating_time:<fourth-HH:mm>
+        weekday:<day> time:<game-HH:mm>
+        duration_minutes:60
+      ```
+
+      Discord submits this as one command; the lines above are for readability.
+      `/guild setup` must display the five stages in the same order before you
+      continue.
 
 - [ ] Enable Review without changing any custom reminder rule:
 
@@ -222,12 +244,27 @@ than expected before `/week open`, generate fresh values.
 - [ ] Allow up to two Cron intervals (30 minutes) for the scheduled event to be
       created and opened. Members A and B click **Play** and Member C clicks
       **Run a Game** as soon as the signup message appears.
-- [ ] At one hour before the configured start, allow up to one more Cron interval.
-      Run `/week status`. Verify the phase is planned, the recent operations show
+- [ ] After the configured `tables_time`, allow up to one more Cron interval.
+      Run `/week status`. Verify the phase is planned, recent operations show
       `lock-plan`, and no table publication exists. This is Review's approval
       stop.
 - [ ] Run `/week publish`, verify one public table, then clear this synthetic event
-      with `/week cancel reason:Pilot review-mode complete`.
+      only after completing these player-capacity checks:
+
+      1. The draft identifies one player as reserved and the later signup on the
+         global waitlist. The reserved player chooses the table successfully.
+      2. Before `open_seating_time`, the global-waitlist player tries **Join** and
+         receives a private explanation that signup-order capacity is still
+         reserved. The table must not change.
+      3. The reserved player presses **Withdraw** on the weekly signup card. This
+         is a drop from the week, not merely **Leave Table**.
+      4. Verify the first global-waitlist player receives one private promotion
+         message, may now choose the table, and no duplicate DM arrives after an
+         additional Cron interval.
+      5. Have that promoted player use **Leave Table**. Verify their weekly
+         reservation remains active; leaving a table must not withdraw them.
+
+      Then run `/week cancel reason:Pilot review-mode complete`.
 - [ ] Immediately return to `/guild automation mode:Paused confirm:True` before
       changing the schedule for the next check.
 

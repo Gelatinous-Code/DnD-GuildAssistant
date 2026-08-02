@@ -5,6 +5,7 @@ import {
   renderPlanPreview,
   renderPublishedTable,
   renderSignupMessage,
+  safeAllowedMentions,
   type DiscordMessagePayload,
   type PlanPreviewInput,
   type PublishedTableInput,
@@ -14,7 +15,12 @@ import {
   rankGmCandidates,
   type GmCandidate,
 } from "./domain/table-planner";
-import { nextWeeklyOccurrence } from "./schedule";
+import {
+  cadenceFromConfig,
+  NEW_DAWN_CADENCE,
+  cadenceWindowsForStart,
+  nextWeeklyOccurrence,
+} from "./schedule";
 import {
   GuildRepository,
   TableSelectionUnavailableError,
@@ -74,6 +80,35 @@ function safeInline(value: string, maximum = 100): string {
 export class WeekService {
   private readonly now: () => number;
   private readonly id: () => string;
+
+  private cadenceWindows(config: GuildConfig, startsAt: number): {
+    gmSignupOpensAt: number;
+    playerSignupOpensAt: number;
+    tablesPublishAt: number;
+    openSeatingAt: number;
+  } {
+    const cadence = cadenceFromConfig(config);
+    if (!cadence) {
+      const gmSignupOpensAt = startsAt - config.signupOpenLeadDays * 86_400_000;
+      const tablesPublishAt = startsAt - config.signupLockLeadHours * 3_600_000;
+      return {
+        gmSignupOpensAt,
+        playerSignupOpensAt: gmSignupOpensAt,
+        tablesPublishAt,
+        openSeatingAt: tablesPublishAt,
+      };
+    }
+    const windows = cadenceWindowsForStart(
+      cadence,
+      new Date(startsAt).toISOString(),
+    );
+    return {
+      gmSignupOpensAt: Date.parse(windows.gmSignupOpensAt),
+      playerSignupOpensAt: Date.parse(windows.playerSignupOpensAt),
+      tablesPublishAt: Date.parse(windows.tablesPublishAt),
+      openSeatingAt: Date.parse(windows.openSeatingAt),
+    };
+  }
 
   constructor(
     private readonly repository: GuildRepository,
@@ -147,22 +182,22 @@ export class WeekService {
         (config.gmRoleId ? "<@&" + config.gmRoleId + ">" : "optional; not configured"),
       "**Reminder role:** " +
         (config.reminderRoleId ? "<@&" + config.reminderRoleId + ">" : "not configured"),
-      "**Schedule:** " +
+      "**Time zone:** " + config.timezone,
+      "**GM signup:** " +
+        (WEEKDAY_NAMES[config.gmSignupDay ?? NEW_DAWN_CADENCE.gmSignup.weekday]) +
+        " at " + (config.gmSignupTime ?? NEW_DAWN_CADENCE.gmSignup.time),
+      "**Player interest:** " +
+        (WEEKDAY_NAMES[config.playerSignupDay ?? NEW_DAWN_CADENCE.playerSignup.weekday]) +
+        " at " + (config.playerSignupTime ?? NEW_DAWN_CADENCE.playerSignup.time),
+      "**Tables publish:** " +
+        (WEEKDAY_NAMES[config.tablePublishDay ?? NEW_DAWN_CADENCE.tablePublish.weekday]) +
+        " at " + (config.tablePublishTime ?? NEW_DAWN_CADENCE.tablePublish.time),
+      "**Open seating:** " +
+        (WEEKDAY_NAMES[config.openSeatingDay ?? NEW_DAWN_CADENCE.openSeating.weekday]) +
+        " at " + (config.openSeatingTime ?? NEW_DAWN_CADENCE.openSeating.time),
+      "**Games:** " +
         (WEEKDAY_NAMES[config.weeklyDay] ?? "weekday " + config.weeklyDay) +
-        " at " +
-        config.weeklyTime +
-        " (" +
-        config.timezone +
-        ")",
-      "**Signup timing:** opens " +
-        config.signupOpenLeadDays +
-        " day" +
-        (config.signupOpenLeadDays === 1 ? "" : "s") +
-        " before; locks " +
-        config.signupLockLeadHours +
-        " hour" +
-        (config.signupLockLeadHours === 1 ? "" : "s") +
-        " before",
+        " at " + config.weeklyTime + " for " + config.eventDurationMinutes + " minutes",
       "**Tables:** " +
         config.tableMinSize +
         " minimum / " +
@@ -202,6 +237,10 @@ export class WeekService {
           ? currentPlan.status + " revision " + currentPlan.generation +
             " (" + currentPlan.selectedGmCount + " tables)"
           : "not generated"),
+      "**GM signup opens:** " + unix(event.signupOpensAt),
+      "**Player signup opens:** " + unix(event.playerSignupOpensAt ?? event.signupOpensAt),
+      "**Tables publish:** " + unix(event.signupLocksAt),
+      "**Open seating:** " + unix(event.openSeatingAt ?? event.signupLocksAt),
     );
     if (currentPlan?.status === "published") {
       const manifestCurrent =
@@ -320,6 +359,7 @@ export class WeekService {
     if (startsAt <= this.now()) {
       throw new UserFacingError("The game start must be in the future.");
     }
+    const windows = this.cadenceWindows(config, startsAt);
 
     const event = await this.repository.createWeeklyEvent({
       eventId: this.id(),
@@ -327,8 +367,10 @@ export class WeekService {
       title: input.title?.trim() || "Weekly Games",
       startsAt,
       endsAt: startsAt + config.eventDurationMinutes * 60_000,
-      signupOpensAt: startsAt - config.signupOpenLeadDays * 86_400_000,
-      signupLocksAt: startsAt - config.signupLockLeadHours * 3_600_000,
+      signupOpensAt: windows.gmSignupOpensAt,
+      playerSignupOpensAt: windows.playerSignupOpensAt,
+      signupLocksAt: windows.tablesPublishAt,
+      openSeatingAt: windows.openSeatingAt,
       tableSelectionClosesAt: startsAt,
       status: "open",
       source: "native",
@@ -367,24 +409,83 @@ export class WeekService {
     const latest = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
     await this.ensureSignupPost(latest, config);
   }
+  async openPlayerSignups(event: WeeklyEvent): Promise<void> {
+    if (event.status !== "open") return;
+    const config = await this.requireConfig(event.guildId);
+    const latest = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
+    await this.ensureSignupPost(latest, config);
+  }
+
+  async openSeating(event: WeeklyEvent): Promise<void> {
+    const latest = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
+    if (latest.status !== "published") return;
+    const plan = await this.repository.getCurrentPlan(latest.eventId);
+    if (!plan || plan.status !== "published") return;
+    const bundle = await this.repository.getPlanBundle(plan.planId);
+    if (!bundle) throw new Error("The published plan could not be loaded for open seating");
+
+    await this.refreshPublishedTables(latest, bundle);
+    const config = await this.requireConfig(latest.guildId);
+    const channelId =
+      latest.tableChannelId ??
+      config.tableChannelId ??
+      config.eventChannelId;
+    if (!channelId) throw new Error("No channel is available for open seating");
+    await this.discord.sendChannelMessage(channelId, {
+      content:
+        "🔓 **Open seating is now active.**\n" +
+        "Signup-order reservations have ended. Any active player may claim an available table seat first-come, first-served until games begin " +
+        unix(latest.tableSelectionClosesAt) +
+        ". Players who did not choose earlier are not penalized.",
+      nonce: discordNonce("open-seating:" + latest.eventId),
+      enforce_nonce: true,
+      allowed_mentions: safeAllowedMentions(),
+    });
+    await this.repository.appendAudit({
+      guildId: latest.guildId,
+      eventId: latest.eventId,
+      action: "week.open-seating",
+      entityType: "weekly_event",
+      entityId: latest.eventId,
+      details: {
+        openSeatingAt: latest.openSeatingAt ?? latest.signupLocksAt,
+      },
+    });
+  }
+
 
   async signupPayload(event: WeeklyEvent): Promise<DiscordMessagePayload> {
     const [gms, players] = await Promise.all([
       this.repository.listActiveSignups(event.eventId, "gm"),
       this.repository.listActiveSignups(event.eventId, "player"),
     ]);
+    const now = this.now();
+    const playerSignupOpensAt = event.playerSignupOpensAt ?? event.signupOpensAt;
+    const gmSignupEnabled = event.status === "open";
+    const playerSignupEnabled = gmSignupEnabled && now >= playerSignupOpensAt;
+    const withdrawEnabled =
+      (event.status === "open" || event.status === "published") &&
+      now < event.tableSelectionClosesAt;
     return renderSignupMessage({
       eventId: event.eventId,
       title: event.title,
       startsAt: event.startsAt,
+      playerSignupOpensAt,
       signupDeadline: event.signupLocksAt,
-      description: "Choose Run a Game or Play. Your latest choice is authoritative.",
+      description: playerSignupEnabled
+        ? "Sign up to run or play. Player signup order reserves available capacity until open seating."
+        : gmSignupEnabled
+          ? "GM signup is open. Player interest opens at the time shown below."
+          : "Tables are published. Withdraw only if you are dropping from this week's games.",
       status:
         event.status === "open"
           ? "open"
           : event.status === "archived" || event.status === "cancelled"
             ? "archived"
             : "locked",
+      gmSignupEnabled,
+      playerSignupEnabled,
+      withdrawEnabled,
       gmNames: gms.map(userLabel),
       playerNames: players.map(userLabel),
     });
@@ -428,17 +529,59 @@ export class WeekService {
     if (event.guildId !== input.guildId) {
       throw new UserFacingError("That weekly signup belongs to a different server.");
     }
-    if (event.status !== "open") {
-      throw new UserFacingError(
-        "Signups are " + event.status + ". Ask an administrator about a late correction.",
-      );
-    }
-
+    const now = this.now();
     let message: string;
+
     if (input.action === "withdraw") {
+      if (
+        !["open", "published"].includes(event.status) ||
+        now >= event.tableSelectionClosesAt
+      ) {
+        throw new UserFacingError(
+          "Self-service withdrawal is closed. Ask an organizer for a correction.",
+        );
+      }
+      const existing = await this.repository.getSignup(event.eventId, input.userId);
+      if (event.status === "published" && existing?.signupKind === "gm") {
+        throw new UserFacingError(
+          "A published GM change affects an entire table. Please contact an organizer.",
+        );
+      }
       const changed = await this.repository.withdrawSignup(input.eventId, input.userId);
-      message = changed ? "Signup withdrawn." : "You were not actively signed up.";
+      message = changed ? "You dropped from this week's games." : "You were not actively signed up.";
+      if (changed && event.status === "published") {
+        const plan = await this.repository.getCurrentPlan(event.eventId);
+        if (plan?.status === "published") {
+          const result = await this.repository.withdrawAssignmentAndPromote(
+            plan.planId,
+            input.userId,
+            now < (event.openSeatingAt ?? event.signupLocksAt),
+          );
+          const bundle = await this.repository.getPlanBundle(plan.planId);
+          if (bundle) await this.refreshPublishedTables(event, bundle);
+          if (result.rosterPromoted) {
+            message += " The first waitlisted player now has the reserved opening and will be notified.";
+          }
+        }
+      }
     } else {
+      if (
+        event.status !== "open" &&
+        !(event.status === "published" && input.action === "player" &&
+          now < event.tableSelectionClosesAt)
+      ) {
+        throw new UserFacingError(
+          event.status === "published" && input.action === "gm"
+            ? "GM signup closed when tables were published. Ask an organizer about a late correction."
+            : "New signups closed for this week.",
+        );
+      }
+      const playerSignupOpensAt = event.playerSignupOpensAt ?? event.signupOpensAt;
+      if (input.action === "player" && now < playerSignupOpensAt) {
+        throw new UserFacingError(
+          "Player signup opens " + unix(playerSignupOpensAt) + ". GM signup is open now.",
+        );
+      }
       await this.repository.saveSignup({
         eventId: input.eventId,
         userId: input.userId,
@@ -446,7 +589,30 @@ export class WeekService {
         signupKind: input.action,
         source: "native",
       });
-      message = input.action === "gm" ? "Signed up to run a game." : "Signed up to play.";
+      if (input.action === "gm") {
+        message = "Signed up to run a game.";
+      } else if (event.status === "published") {
+        const plan = await this.repository.getCurrentPlan(event.eventId);
+        if (!plan || plan.status !== "published") {
+          throw new UserFacingError(
+            "The published table plan is not available. Ask an organizer for help.",
+          );
+        }
+        const assignment = await this.repository.ensureUnassignedAssignment({
+          assignmentId: this.id(),
+          planId: plan.planId,
+          userId: input.userId,
+          displayName: input.displayName,
+        });
+        const openSeatingAt = event.openSeatingAt ?? event.signupLocksAt;
+        message = now >= openSeatingAt
+          ? "Signed up to play. Open seating is active; claim any available table before game time."
+          : assignment.rosterStatus === "reserved"
+            ? "Signed up to play. An open weekly reservation is yours; choose any published table with space."
+            : "Signed up to play. The planned seats are reserved, so you are on the global waitlist. You will be privately notified if your reservation opens.";
+      } else {
+        message = "Signed up to play.";
+      }
     }
     await this.repository.appendAudit({
       guildId: event.guildId,
@@ -455,8 +621,10 @@ export class WeekService {
       action: "signup." + input.action,
       entityType: "signup",
       entityId: input.userId,
+
     });
-    return { event, payload: await this.signupPayload(event), message };
+    const latest = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
+    return { event: latest, payload: await this.signupPayload(latest), message };
   }
 
   async lockWeek(
@@ -524,7 +692,11 @@ export class WeekService {
     if (input.action === "withdraw") {
       await this.repository.withdrawSignup(event.eventId, input.userId);
       if (plan) {
-        await this.repository.withdrawAssignmentAndPromote(plan.planId, input.userId);
+        await this.repository.withdrawAssignmentAndPromote(
+          plan.planId,
+          input.userId,
+          this.now() < (event.openSeatingAt ?? event.signupLocksAt),
+        );
         assignmentMayHaveChanged = true;
       }
     } else {
@@ -545,7 +717,11 @@ export class WeekService {
       } else if (plan?.status === "published" && input.action === "gm") {
         // A seated player who becomes a GM must immediately release their seat;
         // the normal promotion path keeps the visible published plan consistent.
-        await this.repository.withdrawAssignmentAndPromote(plan.planId, input.userId);
+        await this.repository.withdrawAssignmentAndPromote(
+          plan.planId,
+          input.userId,
+          this.now() < (event.openSeatingAt ?? event.signupLocksAt),
+        );
         assignmentMayHaveChanged = true;
       }
     }
@@ -585,19 +761,28 @@ export class WeekService {
     players: readonly Signup[],
     tables: ReadonlyArray<SaveDraftPlanInput["tables"][number]>,
     previous: PlanBundle | null,
+    roster: ReadonlyMap<
+      string,
+      { rosterStatus: "reserved" | "bench"; rosterRank: number }
+    >,
   ): SaveDraftPlanInput["assignments"] {
     const next = new Map<string, SaveDraftPlanInput["assignments"][number]>(
-      players.map((player) => [
-        player.userId,
-        {
-          assignmentId: this.id(),
-          tableId: null,
-          userId: player.userId,
-          displayName: player.displayName || player.userId,
-          status: "unassigned" as const,
-          waitlistPosition: null,
-        },
-      ]),
+      players.map((player) => {
+        const rosterEntry = roster.get(player.userId);
+        if (!rosterEntry) throw new Error("Player roster rank was not generated");
+        return [
+          player.userId,
+          {
+            assignmentId: this.id(),
+            tableId: null,
+            userId: player.userId,
+            displayName: player.displayName || player.userId,
+            status: "unassigned" as const,
+            waitlistPosition: null,
+            ...rosterEntry,
+          },
+        ];
+      }),
     );
     if (!previous) return players.map((player) => next.get(player.userId)!);
 
@@ -610,6 +795,7 @@ export class WeekService {
 
     for (const assignment of previous.assignments) {
       if (!playerById.has(assignment.userId)) continue;
+      if (roster.get(assignment.userId)?.rosterStatus === "bench") continue;
       if (assignment.status !== "assigned" && assignment.status !== "waitlisted") continue;
       const desiredTableId = assignment.desiredTableId ?? assignment.tableId;
       const previousTable = desiredTableId
@@ -641,13 +827,12 @@ export class WeekService {
       });
       for (const [index, previousAssignment] of candidates.entries()) {
         const player = playerById.get(previousAssignment.userId)!;
+        const base = next.get(player.userId)!;
         if (index < table.capacity) {
           next.set(player.userId, {
-            assignmentId: next.get(player.userId)!.assignmentId,
+            ...base,
             tableId: table.tableId,
             desiredTableId: table.tableId,
-            userId: player.userId,
-            displayName: player.displayName || player.userId,
             status: "assigned",
             waitlistPosition: null,
             assignedAt:
@@ -657,11 +842,10 @@ export class WeekService {
           });
         } else {
           next.set(player.userId, {
-            assignmentId: next.get(player.userId)!.assignmentId,
+            ...base,
             tableId: null,
             desiredTableId: table.tableId,
-            userId: player.userId,
-            displayName: player.displayName || player.userId,
+
             status: "waitlisted",
             waitlistPosition: index - table.capacity + 1,
           });
@@ -752,10 +936,25 @@ export class WeekService {
       gmUserId: table.gm.userId,
       gmDisplayName: table.gm.displayName ?? table.gm.userId,
     }));
-    // A revision keeps choices only when the selected GM still owns a table.
-    // Assigned players retain first claim on capacity; compatible waitlists
-    // preserve their stable order and fill any remaining seats.
-    const assignments = this.carryForwardAssignments(players, tables, previousBundle);
+    const rankedPlayers = [...players].sort(
+      (left, right) =>
+        left.signedUpAt - right.signedUpAt || left.userId.localeCompare(right.userId),
+    );
+    const benchUserIds = new Set(planned.waitlist.map((player) => player.userId));
+    const roster = new Map<
+      string,
+      { rosterStatus: "reserved" | "bench"; rosterRank: number }
+    >(
+      rankedPlayers.map((player, index) => [
+        player.userId,
+        {
+          rosterStatus: benchUserIds.has(player.userId) ? "bench" : "reserved",
+          rosterRank: index + 1,
+        },
+      ]),
+    );
+    // Revisions preserve table choices only for players who still hold a reserved seat.
+    const assignments = this.carryForwardAssignments(players, tables, previousBundle, roster);
 
     const bundle = await this.repository.saveDraftPlan({
       plan: {
@@ -811,7 +1010,9 @@ export class WeekService {
     bundle: PlanBundle,
     explanations: readonly string[] = [],
   ): DiscordMessagePayload {
-    const unassigned = bundle.assignments.filter((item) => item.status === "unassigned");
+    const unassigned = bundle.assignments.filter(
+      (item) => item.status === "unassigned" && item.rosterStatus !== "bench",
+    );
     const warnings = [
       bundle.plan.selectedGmCount +
         " of " +
@@ -823,12 +1024,11 @@ export class WeekService {
         " players.",
       ...explanations,
     ];
-    if (unassigned.length) warnings.push(unassigned.length + " players will choose a table");
+    if (unassigned.length) warnings.push(unassigned.length + " reserved players still need to choose a table");
     if (bundle.plan.waitlistCount) {
       warnings.push(
-        "Projected capacity shortfall: " +
-          bundle.plan.waitlistCount +
-          " players exceed currently planned seats; live table waitlists begin only after selection.",
+        bundle.plan.waitlistCount +
+          " players are on the global waitlist in signup order. A drop before open seating promotes the first person.",
       );
     }
     const input: PlanPreviewInput = {
@@ -845,7 +1045,7 @@ export class WeekService {
           .map((assignment) => assignment.displayName),
       })),
       waitlist: bundle.assignments
-        .filter((assignment) => assignment.status === "waitlisted")
+        .filter((assignment) => assignment.rosterStatus === "bench")
         .map((assignment) => assignment.displayName),
       warnings,
     };
@@ -977,6 +1177,8 @@ export class WeekService {
         .map((assignment) => assignment.displayName),
       eventTitle: event.title,
       startsAt: event.startsAt,
+      openSeatingAt: event.openSeatingAt ?? event.signupLocksAt,
+      openSeating: this.now() >= (event.openSeatingAt ?? event.signupLocksAt),
       closed: closed ?? this.now() >= event.tableSelectionClosesAt,
     };
   }
@@ -1192,6 +1394,21 @@ export class WeekService {
     }
 
     const previous = await this.repository.getAssignment(input.planId, input.userId);
+    if (input.action === "join") {
+      if (!previous || previous.status === "withdrawn") {
+        throw new UserFacingError("Only an active player signup can choose a table.");
+      }
+      const openSeatingAt = event.openSeatingAt ?? event.signupLocksAt;
+      if (previous.rosterStatus === "bench" && this.now() < openSeatingAt) {
+        throw new UserFacingError(
+          "You are on the global waitlist because the currently planned seats were reserved by earlier signups. " +
+            "If a reserved player drops, the first waitlisted player is promoted and privately notified. " +
+            "Any remaining seats become first-come, first-served " +
+            unix(openSeatingAt) +
+            ".",
+        );
+      }
+    }
     const affectedTableIds = new Set(
       [input.tableId, previous?.tableId, previous?.desiredTableId].filter(
         (value): value is string => Boolean(value),

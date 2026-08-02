@@ -34,13 +34,14 @@ The representative input in `test/fixtures/sanitized-week.json` is fully synthet
 
 Times are evaluated in the configured IANA time zone. Defaults are shown; each guild may change them.
 
-1. **T-7 days — create/open:** the scheduler creates the weekly event and publishes Guild Assistant's native GM/player signup controls. Repeated cron delivery uses the same event/operation key and must not duplicate the event or message.
-2. **While open — collect:** members choose GM, player, or withdraw. A later choice replaces that member's earlier active choice instead of creating a duplicate. Configured reminders may mention only explicitly allowed roles.
-3. **T-24 hours — lock:** the scheduler locks the signup snapshot. Late changes require an administrator decision; they do not silently change a draft or published plan.
-4. **After lock — plan/review:** deterministic GM priority and table sizing produce a persisted draft. In review mode an authorized admin previews and publishes it; in autopilot the scheduler publishes it. Intentional corrections and overrides are audited.
-5. **After publish — choose tables:** players may select, change, or leave a table; capacity, deterministic waitlists, and promotions remain authoritative in D1. Optional weekly roles are reconciled from the current plan.
-6. **At game time — finalize:** table controls close and the scheduler posts a closed final manifest of tables, GMs, players, waitlists, and unassigned players. Existing player choices survive a late correction when the table still exists and has capacity; otherwise deterministic waitlist/unassigned rules apply.
-7. **After play — archive:** the week becomes read-only operational history and assistant-owned role leases are released. No CSV or spreadsheet handoff is required.
+1. **Wednesday 17:00 — GM signup:** the scheduler creates the week and opens GM volunteering. Repeated Cron delivery uses the same event and operation keys.
+2. **Thursday 17:00 — player interest:** the Play button opens. A later GM/player choice replaces the member's earlier active choice instead of creating a duplicate.
+3. **Saturday 17:00 — tables:** signup order is snapshotted, deterministic GM priority and sizing create tables, and total capacity divides players into reserved and global-waitlist rosters. Review mode waits for `/week publish`; Autopilot publishes immediately.
+4. **Saturday through Monday — reserved selection:** reserved players choose any table with room. Leaving a table clears only that choice. Withdrawing drops the player from the week; before open seating, the first global-waitlist player inherits the reservation and receives a durable private notification.
+5. **Monday 17:00 — open seating:** signup-order protection ends. Any active player may claim remaining capacity first-come, first-served. A player who never chose a table is not penalized.
+6. **Tuesday 18:00 — finalize:** table controls close and the scheduler posts the final manifest. Drops are accepted until this boundary.
+7. **Tuesday 18:00–21:00 — play:** New Dawn's in-person games run for three hours; other guilds may configure another duration.
+8. **After play — archive:** the week becomes read-only operational history and assistant-owned role leases are released. No CSV or spreadsheet handoff is required.
 
 ## Permissions and dependencies
 

@@ -1,79 +1,40 @@
-# Promote the tested bot to the real guild
+# Move the tested bot to the real Discord server
 
-Use this guide only after the disposable-server pilot is marked **PASS**. The
-same deployed Worker can serve both the test server and the real guild: every
-guild's configuration and weekly data are isolated by Discord Server ID in D1.
-No second Cloudflare Worker or database is required.
+**Audience: the deployer and the Discord server owner working through separate
+handoffs.** Begin only after the disposable-server pilot is marked PASS for the
+exact deployed commit.
 
-Commands are currently registered per guild, not globally. Installing the bot
-does not make slash commands appear until the registration step below succeeds.
+The same Worker and D1 database can serve the test server and the real server.
+Each server's configuration and weekly data are separated by Discord Server ID.
+Do not create a second production Worker unless the maintainers deliberately
+want a separate environment.
 
-## Before you start
+Keep the current manual process available until the first real week completes.
 
-You need:
+## Handoff A: deployer registers the real server
 
-- the full commit SHA that passed the pilot, is deployed, and is on `main`;
-- Manage Server in the real Discord guild;
-- access to the Discord application and GitHub repository; and
-- the real guild's intended channel, time zone, schedule, table sizes, and
-  optional roles.
+The Discord server owner gives the deployer the real **Server ID**, not a bot
+token. To copy it, enable Discord Developer Mode, right-click the server, and
+choose **Copy Server ID**.
 
-Keep Raid Helper or the current manual process available until the first real
-Guild Assistant week completes successfully.
+The deployer confirms:
 
-The formal pilot must happen **after merge** against the exact deployed `main`
-commit. Pre-merge testing is useful feedback, but it does not count as the final
-PASS. If a squash or rebase merge creates a new SHA, migrate and deploy that new
-`main` SHA and run the complete test-guild pilot against it before promotion.
+- the full pilot-tested commit is the active Worker deployment and is on `main`;
+- remote D1 migrations are current;
+- the `discord-command-registration` GitHub environment is limited to `main`;
+- `DISCORD_BOT_TOKEN` is an environment secret; and
+- `DISCORD_APPLICATION_ID` is an environment or repository variable.
 
-## 1. Protect production command registration
+Then use **GitHub Actions → Register Discord commands → Run workflow**:
 
-The workflow uses the `discord-command-registration` GitHub environment. Before
-using it for the real guild:
+1. select `main`;
+2. enter the real Server ID as `target_guild_id`;
+3. enter the full deployed commit SHA as `deployed_ref`;
+4. confirm that the compatible Worker and migrations are live; and
+5. require a green workflow result.
 
-1. Open **Repository Settings → Environments → discord-command-registration**.
-2. Limit deployment branches to `main` and add a required reviewer when another
-   maintainer is available.
-3. Store `DISCORD_BOT_TOKEN` as an **environment secret**.
-4. Store `DISCORD_APPLICATION_ID` as an environment or repository variable.
-5. Remove any repository-level copy of `DISCORD_BOT_TOKEN` after the environment
-   secret works. This prevents an untrusted branch workflow from reading it.
-
-The registration workflow itself accepts only a full 40-character commit SHA
-that is already on `main` history.
-
-## 2. Install the application in the real guild
-
-In the Discord Developer Portal, reuse the installation settings proven by the
-test guild:
-
-- scopes: `applications.commands` and `bot`;
-- required permissions: View Channels, Send Messages, Embed Links, and Read
-  Message History;
-- Attach Files if real-guild admins will use `/week export`; and
-- Manage Roles only if the Weekly GM role will be automated.
-
-Do not grant Administrator. For a private application, keep **Installation →
-Install Link** set to **None** and generate the install URL under **OAuth2 → URL
-Generator**. Open that URL, choose the real guild, and authorize it.
-
-Enable Discord Developer Mode, right-click the real server, and choose **Copy
-Server ID**. Keep this non-secret ID ready for registration.
-
-## 3. Register commands for the real guild
-
-Preferred GitHub path:
-
-1. Open **Actions → Register Discord commands**.
-2. Select **Run workflow** from `main`.
-3. Enter the real **Server ID** as `target_guild_id`.
-4. Enter the full pilot-tested commit SHA as `deployed_ref`.
-5. Check `deployment_verified` and start the run.
-6. Approve the protected environment when prompted and require a green result.
-
-If GitHub Actions is unavailable, register locally from the exact deployed
-`main` checkout. A complete ignored `.dev.vars` must already contain the
-matching Application ID and Bot Token:
+If the protected workflow is unavailable, the deployer may register from the
+exact deployed checkout with a complete ignored `.dev.vars`:
 
 ```powershell
 $env:DISCORD_GUILD_ID = "paste_real_server_id_here"
@@ -81,64 +42,86 @@ npm run commands:register
 Remove-Item Env:DISCORD_GUILD_ID
 ```
 
-This replaces Guild Assistant's command definitions only in that guild.
+That fallback belongs to the deployer. The Discord server owner does not run it.
 
-## 4. Configure the real guild while Paused
+Handoff checkpoint: the deployer tells the server owner that commands are
+registered for the exact real Server ID.
 
-In the real guild, run `/ping`. Then save the actual production choices in one
-command (Discord displays these as option fields):
+## Handoff B: server owner installs the application
+
+In the Discord Developer Portal, use the same installation settings proven in
+the test server:
+
+- scopes: `applications.commands` and `bot`;
+- core permissions: View Channels, Send Messages, Embed Links, and Read Message
+  History;
+- Attach Files only if administrators will use `/week export`; and
+- Manage Roles only if the optional Weekly GM role will be automated.
+
+Do not grant Administrator. Open the application's install link, choose the real
+server, and authorize it.
+
+In the real server, run `/ping`. If it does not answer, stop and return the issue
+to the deployer. Do not continue by guessing at setup.
+
+## Discord-only real-server setup
+
+From this point through activation, every action happens in Discord.
+
+1. Create the real workflow channel.
+2. Run `/guild setup channel:#your-channel`.
+3. Run `/guild setup` without options and read all five weekly stages.
+4. Change any wrong day, time, time zone, duration, or table size.
+5. Run `/guild status`, then `/guild doctor`.
+6. Fix every ❌ for a feature you plan to use.
+
+Use [Discord server setup](guild-setup.md) for the full plain-language field and
+permission guide. Do not copy the example schedule without checking it against
+the guild's actual policy.
+
+Leave automation Paused while configuring optional reminders or roles. If using
+a Weekly GM role, require a correct preview:
 
 ```text
-/guild setup channel:#guild-games timezone:America/Denver weekday:Saturday time:18:30 minimum:4 preferred:6 maximum:6 signup_lead_days:7 lock_lead_hours:24
+/roles sync dry_run:True
 ```
 
-Replace every example value that differs from the guild's real policy. Add
-`gm_role`, `reminder_role`, or `admin_role` only when those features will be
-used. Setup remains Paused.
+## Start the first real week in Review
 
-Run, in order:
-
-```text
-/guild setup
-/guild status
-/guild doctor
-```
-
-Confirm every displayed value and fix every ❌. Optional ⚠️ warnings may remain
-only for features the real guild will not use. If role sync is planned, require
-a clean `/roles sync dry_run:True` first. If a custom reminder is planned,
-configure it now and inspect the saved private rendering.
-
-## 5. Start the real guild in Review mode
-
-Enable Review without overwriting a custom reminder:
+Run:
 
 ```text
 /guild automation mode:Review before publish confirm:True role_sync:False
 ```
 
-Use `role_sync:True` only after its dry run is correct. To use the built-in
-48-hour reminder instead of a custom rule, add `reminders:True`.
+Use `role_sync:True` only after its preview passes. Add `reminders:True` only
+when you want the built-in reminder; do not overwrite a custom reminder while
+changing mode.
 
-For the first real week:
+For the first real week, organizers should:
 
-1. verify the signup post and local timestamps;
-2. compare GM/player counts with the old process;
-3. inspect the planned tables with `/week status`;
-4. publish them manually with `/week publish`; and
-5. verify the final manifest and archive before retiring the fallback process.
+1. verify the signup post and all local times;
+2. compare player and GM counts with the fallback process;
+3. inspect the private plan with `/week status`;
+4. publish with `/week publish`; and
+5. verify the final roster and post-game attendance before retiring the fallback.
 
-Remain in Review as long as organizers want approval. When the guild is ready
-for automatic publication, run:
+Continue in Review for as many weeks as the guild wants. Use Autopilot only
+after organizers trust the complete flow:
 
 ```text
 /guild automation mode:Autopilot confirm:True
 ```
 
-## Roll back safely
+## Roll back without losing state
 
-Run `/guild automation mode:Paused confirm:True` to stop new scheduled weekly
-transitions. Use `/week cancel` or `/week archive` only when appropriate for the
-active phase, keep D1 intact, and resume the prior guild process while the issue
-is investigated. Never repair production by editing D1 rows or Discord bot
-messages directly.
+Pause scheduled transitions:
+
+```text
+/guild automation mode:Paused confirm:True
+```
+
+Use `/week cancel` or `/week archive` only when it matches the active phase.
+Keep D1 intact, resume the previous guild process, and give the maintainer the
+event ID plus sanitized `/week status` and `/guild doctor` output. Never repair
+production by editing D1 rows or bot messages directly.

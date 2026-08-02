@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   eventKey,
+  NEW_DAWN_CADENCE,
+  cadenceWindows,
+  validateWeeklyCadence,
   nextWeeklyOccurrence,
   occurrenceWindows,
   validateWeeklySchedule,
@@ -69,6 +72,43 @@ describe("weekly scheduling", () => {
       "time zone 'Mars/Olympus' is not a valid IANA time zone",
     ]);
   });
+  it("resolves the New Dawn weekly stages in America/Denver", () => {
+    expect(
+      cadenceWindows(NEW_DAWN_CADENCE, "2026-08-05T00:00:00Z"),
+    ).toEqual({
+      gmSignupOpensAt: "2026-08-05T23:00:00Z",
+      playerSignupOpensAt: "2026-08-06T23:00:00Z",
+      tablesPublishAt: "2026-08-08T23:00:00Z",
+      openSeatingAt: "2026-08-10T23:00:00Z",
+      startsAt: "2026-08-12T00:00:00Z",
+    });
+  });
+
+  it("keeps local stage times stable across daylight-saving changes", () => {
+    const winter = cadenceWindows(
+      NEW_DAWN_CADENCE,
+      "2026-01-27T00:00:00Z",
+    );
+    expect(winter).toEqual({
+      gmSignupOpensAt: "2026-01-22T00:00:00Z",
+      playerSignupOpensAt: "2026-01-23T00:00:00Z",
+      tablesPublishAt: "2026-01-25T00:00:00Z",
+      openSeatingAt: "2026-01-27T00:00:00Z",
+      startsAt: "2026-01-28T01:00:00Z",
+    });
+  });
+
+  it("rejects a cadence whose stages are out of order", () => {
+    expect(
+      validateWeeklyCadence({
+        ...NEW_DAWN_CADENCE,
+        playerSignup: { weekday: 2, time: "17:00" },
+      }),
+    ).toContain(
+      "weekly cadence must run in this order: GM signup, player signup, table publication, open seating, game",
+    );
+  });
+
 
   it("creates a stable idempotency key", () => {
     expect(eventKey("guild", "2026-08-02T00:30:00Z")).toBe("guild:1785630600000");

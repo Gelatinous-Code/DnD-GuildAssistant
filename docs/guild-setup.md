@@ -1,253 +1,211 @@
-# Configure a Discord guild
+# Discord server setup
 
-Use this guide after the Worker is deployed, the application is installed in a
-disposable Discord server, and `/ping` works. All commands in this guide are run
-inside Discord by a member with **Manage Server**.
+This guide is for the Discord server owner or another member with **Manage
+Server**. Everything on this page happens inside Discord. There are no computer,
+npm, or Cloudflare commands here.
 
-The bot has no separate web control panel. `/guild setup` is its configuration
-screen. Setup responses are private, the process is resumable, and the scheduler
-stays paused until an administrator explicitly enables it.
+Use this guide only after `/ping` answers. If `/ping` is missing or silent, the
+hosting setup is not complete; send the [first-deployment guide](first-deployment.md)
+to the deployer.
 
-## The five-minute safe setup
+## Before you begin
 
-The built-in schedule is New Dawn's default, not a universal recommendation.
-Every guild should explicitly confirm its time zone, weekday, and start time.
+Decide these things with the people who run game night:
 
-1. Create a normal text channel such as `#guild-assistant-test`.
-2. Save that channel:
+- the channel where weekly signup and table posts belong;
+- the guild's local time zone;
+- when GM signup, player signup, tables, open seating, and game time happen; and
+- the smallest, preferred, and largest number of players at one table.
 
-   ```text
-   /guild setup channel:#guild-assistant-test
-   ```
+Optional reminder and Weekly GM roles can wait. The basic workflow does not need
+them.
 
-3. Run `/guild setup` again with no options. Confirm the displayed time zone,
-   weekday, time, signup window, and table sizes. Update any value that is wrong.
-4. Run `/guild status` and then `/guild doctor`.
-5. Fix every ❌. Optional ⚠️ warnings may remain only when that feature is
-   intentionally unused.
-6. Leave automation **Paused** while you run the test-guild pilot. The pilot
-   explains exactly when to enable Review and Autopilot.
+## The shortest safe setup
 
-The first setup command saves these defaults:
+### 1. Make one channel
 
-- Saturday at 18:30 in `America/Denver`;
-- signups open seven days before the game and lock 24 hours before it;
-- four players minimum, six preferred, and six maximum per table;
-- the selected channel receives signup, table, and built-in reminder posts;
-- reminders, Weekly GM role sync, and scheduled automation remain off.
+Create a normal text channel, such as `#guild-games`. Give the bot these channel
+permissions:
 
-Nothing is published merely by saving setup.
+- View Channel
+- Send Messages
+- Embed Links
+- Read Message History
 
-## How `/guild setup` updates settings
+Do not give the bot Administrator.
 
-Running `/guild setup` without options only shows the current dashboard. It does
-not save anything.
+### 2. Save the channel
 
-The first save requires `channel`. After that, each setup call changes only the
-options supplied and retains every other saved value. For example, this changes
-only the game time:
+Run this in Discord and choose the channel from Discord's picker:
+
+```text
+/guild setup channel:#guild-games
+```
+
+The first save creates the rest of the settings with the built-in starting
+values. It does not publish a week, and automation remains Paused.
+
+### 3. Read the setup dashboard
+
+Run `/guild setup` again without adding options. The private response shows the
+whole weekly flow in order:
+
+1. GM signup opens.
+2. Player signup opens.
+3. Tables are planned or published.
+4. Unclaimed places become first-come, first-served.
+5. Games begin.
+
+The built-in starting values are for New Dawn: Wednesday 17:00, Thursday 17:00,
+Saturday 17:00, Monday 17:00, then Tuesday 18:00 for a three-hour game, all in
+`America/Denver`. Treat these as examples. Change anything that does not match
+your guild.
+
+### 4. Change one setting at a time
+
+You do not have to build one enormous command. `/guild setup` changes only the
+fields you provide and keeps every other saved value.
+
+For example, this changes only game time:
 
 ```text
 /guild setup time:19:00
 ```
 
-Discord presents channels, roles, weekdays, and booleans as pickers. The examples
-in this guide show their selected values as readable text.
-
-## Every `/guild setup` option
-
-### Core weekly settings
-
-| Option | Default | What it means | Rules |
-| --- | --- | --- | --- |
-| `channel` | No default; required once | One normal text or announcement channel for signup posts, table posts, and built-in reminders | Must belong to this server and be visible to the bot |
-| `timezone` | `America/Denver` | Time zone used for every weekly deadline | Use an IANA region such as `America/Denver`, not a fixed offset, so daylight-saving changes work |
-| `weekday` | Saturday | Local day the guild normally plays | Choose Monday through Sunday |
-| `time` | `18:30` | Local game start time | Use 24-hour `HH:mm`, such as `09:30` or `19:00` |
-| `signup_lead_days` | `7` | Days before game time that signups open | Whole number from 1 through 7 |
-| `lock_lead_hours` | `24` | Hours before game time that signups lock and planning begins | Whole number from 1 through 168; cannot be longer than the signup window |
-
-`/guild setup` uses one channel for signup, table, and built-in reminder posts.
-A custom reminder may use another destination through `/reminder configure`
-with its `channel` option. Signup and table channels are not separately
-configurable yet. Every event has a fixed four-hour duration.
-
-### Table planning settings
-
-| Option | Default | What it means | Rules |
-| --- | ---: | --- | --- |
-| `minimum` | 4 | Smallest viable player count used when deciding whether another GM/table is supportable | 1–20; cannot exceed `preferred` |
-| `preferred` | 6 | Desired player count and plan-health target | 1–20; between `minimum` and `maximum` |
-| `maximum` | 6 | Hard player-seat capacity before the waitlist is used | 1–20; cannot be below `preferred` |
-
-The GM is not counted as a player seat. The recommended production policy is
-`minimum:4 preferred:6 maximum:6`. The pilot deliberately uses smaller values
-so three testers can exercise waitlists and displacement.
-
-### Optional roles
-
-| Option | Purpose | Requirements |
-| --- | --- | --- |
-| `gm_role` | Temporarily assigned to the GMs selected for the currently published week | Create a normal Discord role; grant the bot Manage Roles and place its highest role above this role before enabling role sync |
-| `reminder_role` | The only ordinary audience role scheduled signup reminders may ping | Role must exist and have **Allow anyone to @mention this role** enabled |
-| `admin_role` | Pings organizers only when projected player demand exceeds GM capacity | Role must be mentionable; it does not grant permission to run admin commands |
-
-Selecting a role saves it but does not enable reminders or role sync.
-
-To remove a saved role, use one of these booleans with value `True`:
-
-- `clear_gm_role` — removes assistant-owned Weekly GM role leases and disables
-  role sync; manually assigned roles are preserved;
-- `clear_reminder_role` — clears the default reminder audience; and
-- `clear_admin_role` — clears the capacity-risk organizer audience.
-
-Do not supply a role and its matching `clear_*` option in the same command.
-
-If a custom reminder rule already exists, changing `channel` or using
-`clear_reminder_role` does not rewrite that rule. Run `/reminder configure`
-again afterward.
-
-## Recommended explicit setup example
-
-An administrator who wants to record every important choice can enter one
-command and fill these options in Discord:
+This changes the game day, time, and length together:
 
 ```text
-/guild setup
-  channel: #guild-assistant-test
-  timezone: America/Denver
-  weekday: Saturday
-  time: 18:30
-  minimum: 4
-  preferred: 6
-  maximum: 6
-  signup_lead_days: 7
-  lock_lead_hours: 24
+/guild setup weekday:Friday time:19:00 duration_minutes:240
 ```
 
-Discord sends it as one command; the line breaks above are only for readability.
-Add optional roles only if the pilot will test those features.
+Discord shows channels, roles, weekdays, and True/False values as choices. Times
+use a 24-hour clock: `18:00` means 6:00 PM and `09:30` means 9:30 AM.
 
-## Verify the saved setup
+For the time zone, use a city-based name such as `America/Denver`,
+`America/New_York`, or `Europe/London`. This lets the schedule follow local
+daylight-saving changes.
 
-Run:
+### 5. Check the result
+
+Run these two commands:
 
 ```text
 /guild status
 /guild doctor
 ```
 
-`/guild status` answers: “What is saved, and what week is active?” It shows the
-effective schedule, signup timing, table policy, automation mode, current weekly
-phase, counts, and recent operations.
+- `/guild status` shows what is saved and the current week's state.
+- `/guild doctor` checks whether the bot can use the chosen channel and any
+  optional roles.
 
-`/guild doctor` answers: “Can the bot use the saved Discord resources right
-now?” It checks the channel, bot permissions, optional role existence and
-mentionability, Manage Roles, and role hierarchy.
+Fix every ❌ before continuing. A ➖ means an optional feature is off. A ⚠️ may
+remain only when you intentionally do not use that optional feature.
 
-Interpret the symbols this way:
+## Setup fields in plain language
 
-- ✅ — ready;
-- ➖ — optional and not enabled;
-- ⚠️ — optional capability is unavailable, such as Attach Files for CSV export;
-- ❌ — fix this before enabling the affected feature.
+| Field | Meaning |
+| --- | --- |
+| `channel` | Where signup posts, tables, and built-in reminders appear. |
+| `timezone` | The guild's local city-based time zone. |
+| `gm_day`, `gm_time` | When members may start volunteering to run games. |
+| `player_day`, `player_time` | When members may start signing up to play. |
+| `tables_day`, `tables_time` | When the signup snapshot is planned; Autopilot also publishes then. |
+| `open_seating_day`, `open_seating_time` | When still-unclaimed places stop being protected by signup order. |
+| `weekday`, `time` | The normal game day and start time. |
+| `duration_minutes` | Expected game length, from 60 through 720 minutes. |
+| `minimum` | Fewest players that makes a table useful for planning. |
+| `preferred` | Target number of players at a table. |
+| `maximum` | Hard player limit before that table uses a waitlist. |
 
-The core workflow requires View Channels, Send Messages, Embed Links, and Read
-Message History in the configured channel. Manage Roles is required only for
-Weekly GM role sync. Attach Files is needed only for `/week export`.
+The five weekly stages must stay in that order. If Discord refuses a schedule,
+run `/guild setup` without options, find the stage that is out of order, and
+change that stage. Schedule changes affect the next event the bot creates; they
+do not move an event that already exists.
 
-## Optional: configure reminders
-
-For the built-in reminder, set `reminders:True` when enabling Review mode. It is
-sent 48 hours before signup lock and uses the configured reminder role, if any.
-
-For a custom reminder, configure it first:
+The GM does not count as a player seat. A common table policy is four minimum,
+six preferred, and six maximum:
 
 ```text
-/reminder configure enabled:True hours_before:48 channel:#guild-assistant-test role:@Gaming message:Please choose Run a Game or Play before signups close. We have {players} players and {gms} GMs.
+/guild setup minimum:4 preferred:6 maximum:6
 ```
 
-This command saves the rule immediately and then shows a private rendered
-confirmation. It does not send a reminder immediately. Check the destination,
-timing, text, and role.
+See the [player and GM guide](player-guide.md#choose-a-table) for the member-facing
+explanation of reservations, the global waitlist, table waitlists, and open
+seating.
 
-`/reminder configure` replaces the rule; it is not a partial update. When
-correcting, disabling, or later re-enabling a custom rule, resupply the complete
-desired `hours_before`, `channel`, `role`, and `message`. Omitted timing and text
-return to the built-in 48-hour/default-message values. The supported template
-values are:
+## Optional: reminder roles
 
-- `{event}`
-- `{when}`
-- `{players}`
-- `{gms}`
-- `{open_seats}`
+To let the bot mention a signup audience:
 
-The bot rejects `@everyone`, `@here`, raw member mentions, raw role mentions in
-the message text, unknown template values, and non-mentionable roles. Choose the
-allowed role with the `role` option instead of typing its mention into the
-message.
+1. Create or choose a normal role, such as `Game Night`.
+2. In that role's Discord settings, enable **Allow anyone to @mention this
+   role**.
+3. Save it with `/guild setup reminder_role:@Game Night`.
 
-Important: supplying `reminders:True` or `reminders:False` later through
-`/guild automation` replaces a custom rule with the built-in 48-hour/default
-rule. When a custom rule is already correct, omit the `reminders` option while
-changing automation mode.
+An optional `admin_role` is mentioned only when player demand is larger than the
+planned capacity. It does not grant access to organizer commands.
 
-## Optional: configure the Weekly GM role
+To use the built-in reminder when enabling Review, set `reminders:True`. For a
+custom message or time, use `/reminder configure`; Discord will show a private
+preview before anything is sent. The bot rejects `@everyone`, `@here`, raw user
+mentions, and roles that were not chosen through the command field.
 
-Before enabling role sync:
+## Optional: Weekly GM role
 
-1. Confirm the bot has Manage Roles.
-2. Under **Server Settings → Roles**, move the bot's role above the normal
-   `Weekly GM` role.
-3. Save `gm_role` with `/guild setup`.
-4. Run this exact preview command:
+To give selected GMs a temporary role:
+
+1. Create a normal role such as `Weekly GM`.
+2. Give the bot **Manage Roles**.
+3. In **Server Settings → Roles**, move the bot's role above `Weekly GM`.
+4. Save it with `/guild setup gm_role:@Weekly GM`.
+5. Preview the result:
 
    ```text
    /roles sync dry_run:True
    ```
 
-Never omit `dry_run` while testing. `dry_run:False` applies changes. The bot
-may add the role to GMs selected in the current published plan and records those
-assignments as its own leases. It removes only assistant-leased assignments;
-unrelated and manually assigned roles are preserved.
+Use `dry_run:False` only when the preview is correct. The bot removes only role
+assignments it previously added; it leaves manual assignments alone.
 
-## Choose an automation mode
+## Choose how much the bot automates
 
-| Mode | What the scheduler does | When to use it |
+| Mode | What happens | Recommended use |
 | --- | --- | --- |
-| **Paused** | Does not advance weekly signup/table phases; role sync is forced off | Initial setup, maintenance, or incident containment |
-| **Review before publish** | Opens signups, delivers any enabled reminder, locks, and plans; waits for an admin to run `/week publish`; then finalizes and archives automatically | First activation and normal operation when organizers want approval |
-| **Autopilot** | Runs the complete weekly lifecycle, including publication | Only after the live pilot passes |
+| Paused | Scheduled weekly changes stop; organizer commands still work. | Setup, testing, maintenance, or an incident. |
+| Review before publish | The bot opens, reminds, locks, and plans, then waits for `/week publish`. | First real weeks and any guild wanting human approval. |
+| Autopilot | The complete weekly flow, including publication, is automatic. | After a tested live week. |
 
-Every mode change requires `confirm:True`. During initial setup, leave Paused.
-The test-guild pilot and real-guild promotion guide provide the exact Review and
-Autopilot commands at the point where they are safe to run.
+For the first real week, start in Review:
 
-To turn on the built-in reminder, add `reminders:True`. To preserve an existing
-custom reminder, omit `reminders`. Supplying either reminder value replaces a
-custom rule with the built-in rule. If the Weekly GM role preview passed, choose
-`role_sync:True`; otherwise leave it False.
+```text
+/guild automation mode:Review before publish confirm:True role_sync:False
+```
 
-Review and Autopilot are refused when required channel/permission checks fail.
-Paused mode leaves manual admin lifecycle commands available.
+Use `role_sync:True` only after the role preview passes. Add `reminders:True`
+only when you want the built-in reminder. A custom reminder should be configured
+separately and left unchanged when switching modes.
 
-## Next step
+## You are finished when
 
-Keep the disposable server **Paused** and complete the
-[test-guild go-live pilot](test-guild-pilot.md). That guide enables Review and
-Autopilot at controlled points. Do not enable a real-guild week until the pilot
-has recorded a passing result.
+- `/ping` answers;
+- `/guild setup` shows the intended five-stage schedule;
+- `/guild status` shows the intended table policy and mode;
+- `/guild doctor` has no ❌ for enabled features; and
+- the guild is Paused for testing or deliberately in Review for its first week.
 
-## Common setup problems
+Weekly organizers can now use the [organizer guide](organizer-guide.md). A new
+self-hosted installation should complete the
+[test-server pilot](test-guild-pilot.md) before using a real server or Autopilot.
 
-| Symptom | What to do |
+## Common problems
+
+| Symptom | Fix |
 | --- | --- |
-| `/guild` commands do not appear | Register commands for the correct test Server ID, then reload Discord |
-| Bot appears offline | This HTTP bot has no Gateway presence; use `/ping` |
-| `/ping` does not respond | Verify the Worker deployment, Discord interaction endpoint, and matching Public Key |
-| Channel fails doctor | Grant View Channels, Send Messages, Embed Links, and Read Message History in that channel |
-| Reminder role fails doctor | Enable **Allow anyone to @mention this role** |
-| GM role fails doctor | Grant Manage Roles and move the bot role above the Weekly GM role |
-| Wrong schedule appears | Rerun `/guild setup` with only `timezone`, `weekday`, or `time` |
-| Need to stop automation | Run `/guild automation mode:Paused confirm:True` |
+| `/guild` is missing | Ask the deployer to register commands for this exact Discord Server ID, then reload Discord. |
+| The bot appears offline | Use `/ping`; this bot may not show an online presence. |
+| `/ping` does not answer | Ask the deployer to check the Worker, interaction endpoint, and Discord Public Key. |
+| The channel has a ❌ | Grant View Channel, Send Messages, Embed Links, and Read Message History there. |
+| A reminder role has a ❌ | Enable **Allow anyone to @mention this role**. |
+| The Weekly GM role has a ❌ | Grant Manage Roles and move the bot role above the Weekly GM role. |
+| The schedule is wrong | Change only the incorrect day or time, then reopen `/guild setup`. |
+| Something is happening at the wrong time | Pause automation, run `/guild status`, and check the saved time zone and all five stages. |

@@ -1,4 +1,4 @@
-import { nextWeeklyOccurrence } from "./schedule";
+import { cadenceFromConfig, cadenceWindows, nextWeeklyOccurrence } from "./schedule";
 import { DEFAULT_OPERATION_LEASE_MS } from "./storage/repository";
 import type {
   BeginOperationResult,
@@ -35,8 +35,10 @@ export interface SchedulerRepository {
 
 export interface SchedulerCallbacks {
   openEvent(event: WeeklyEvent): Promise<void>;
+  openPlayerSignups(event: WeeklyEvent): Promise<void>;
   lockAndPlanEvent(event: WeeklyEvent): Promise<void>;
   publishEvent(event: WeeklyEvent): Promise<void>;
+  openSeating(event: WeeklyEvent): Promise<void>;
   syncRoles(event: WeeklyEvent): Promise<void>;
   finalizeEvent(event: WeeklyEvent): Promise<void>;
   archiveEvent(event: WeeklyEvent): Promise<void>;
@@ -48,8 +50,10 @@ export interface ScheduledActionResult {
   action:
     | "create"
     | "open"
+    | "player-open"
     | "lock-plan"
     | "publish"
+    | "open-seating"
     | "roles"
     | "finalize"
     | "archive"
@@ -83,29 +87,44 @@ function eventTitle(startsAt: number, timeZone: string): string {
 }
 
 function eventInput(config: GuildConfig, now: number): CreateWeeklyEventInput {
-  const startsAt = Date.parse(
-    nextWeeklyOccurrence(
-      {
-        weekday: config.weeklyDay,
-        time: config.weeklyTime,
-        timeZone: config.timezone,
-      },
-      new Date(now).toISOString(),
-    ),
-  );
+  const after = new Date(now).toISOString();
+  const cadence = cadenceFromConfig(config);
+  const startsAt = Date.parse(cadence
+    ? cadenceWindows(cadence, after).startsAt
+    : nextWeeklyOccurrence(
+        {
+          weekday: config.weeklyDay,
+          time: config.weeklyTime,
+          timeZone: config.timezone,
+        },
+        after,
+      ));
+  const staged = cadence ? cadenceWindows(cadence, after) : null;
+  const signupOpensAt = staged
+    ? Date.parse(staged.gmSignupOpensAt)
+    : startsAt - config.signupOpenLeadDays * 86_400_000;
+  const playerSignupOpensAt = staged
+    ? Date.parse(staged.playerSignupOpensAt)
+    : signupOpensAt;
+  const tablesPublishAt = staged
+    ? Date.parse(staged.tablesPublishAt)
+    : startsAt - config.signupLockLeadHours * 3_600_000;
+  const openSeatingAt = staged
+    ? Date.parse(staged.openSeatingAt)
+    : tablesPublishAt;
   return {
     eventId: scheduledEventId(config.guildId, startsAt),
     guildId: config.guildId,
     title: eventTitle(startsAt, config.timezone),
     startsAt,
     endsAt: startsAt + config.eventDurationMinutes * 60_000,
-    signupOpensAt: startsAt - config.signupOpenLeadDays * 86_400_000,
-    signupLocksAt: startsAt - config.signupLockLeadHours * 3_600_000,
+    signupOpensAt,
+    playerSignupOpensAt,
+    signupLocksAt: tablesPublishAt,
+    openSeatingAt,
     tableSelectionClosesAt: startsAt,
     reminderAt:
-      startsAt -
-      config.signupLockLeadHours * 3_600_000 -
-      48 * 3_600_000,
+      tablesPublishAt - 48 * 3_600_000,
     status: "draft",
     source: "native",
   };
@@ -127,7 +146,7 @@ async function captureUnpersisted(
 }
 
 export function schedulerOperationKey(
-  action: "create" | "open" | "lock-plan" | "publish" | "roles" | "finalize" | "archive",
+  action: "create" | "open" | "player-open" | "lock-plan" | "publish" | "open-seating" | "roles" | "finalize" | "archive",
   entityId: string,
 ): string {
   return `scheduler:${action}:${entityId}`;
@@ -144,7 +163,7 @@ type PersistedCaptureResult = "completed" | "busy" | "failed";
 async function capturePersisted(
   repository: SchedulerRepository,
   actions: ScheduledActionResult[],
-  action: "create" | "open" | "lock-plan" | "publish" | "roles" | "finalize" | "archive",
+  action: "create" | "open" | "player-open" | "lock-plan" | "publish" | "open-seating" | "roles" | "finalize" | "archive",
   entityId: string,
   guildId: string,
   eventId: string | undefined,
@@ -306,6 +325,22 @@ export async function runScheduledTick(
     // Opening is a multi-step operation: the event transition can commit before
     // Discord accepts (and we persist) the signup post. Reconcile that missing
     // side effect before allowing the same event to advance to its lock step.
+    const playerSignupOpensAt = event.playerSignupOpensAt ?? event.signupOpensAt;
+    if (event.status === "open" && playerSignupOpensAt <= now) {
+      await capturePersisted(
+        repository,
+        actions,
+        "player-open",
+        event.eventId,
+        event.guildId,
+        event.eventId,
+        now,
+        async () => {
+          await callbacks.openPlayerSignups(event);
+        },
+      );
+    }
+
     if (event.status === "open" && !event.signupMessageId) {
       await capturePersisted(
         repository,
@@ -371,6 +406,22 @@ export async function runScheduledTick(
     }
 
     if (event.status === "published") {
+      const openSeatingAt = event.openSeatingAt ?? event.signupLocksAt;
+      if (openSeatingAt <= now && now < event.tableSelectionClosesAt) {
+        await capturePersisted(
+          repository,
+          actions,
+          "open-seating",
+          event.eventId,
+          event.guildId,
+          event.eventId,
+          now,
+          async () => {
+            await callbacks.openSeating(event);
+          },
+        );
+      }
+
       const currentPlan = await repository.getCurrentPlan(event.eventId);
       const publishedPlan = currentPlan?.status === "published" ? currentPlan : null;
 

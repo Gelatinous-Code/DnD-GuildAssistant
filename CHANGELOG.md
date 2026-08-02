@@ -9,6 +9,10 @@ The project follows [Semantic Versioning](https://semver.org/). Dates use the
 
 ### Added
 
+- Private, topic-based `/help` guidance for players, GMs, priority tokens, and
+  weekly organizers.
+- Audience-specific player, organizer, Discord setup, deployment, and operations
+  guides with Discord and computer commands kept in separate paths.
 - Initial Cloudflare Worker Discord interaction endpoint.
 - Signed request verification, endpoint PING/PONG handling, and ping command.
 - Tests, type checking, and repository community health files.

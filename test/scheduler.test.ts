@@ -98,8 +98,10 @@ function plan(overrides: Partial<Plan> = {}): Plan {
 function callbacks(): SchedulerCallbacks {
   return {
     openEvent: vi.fn().mockResolvedValue(undefined),
+    openPlayerSignups: vi.fn().mockResolvedValue(undefined),
     lockAndPlanEvent: vi.fn().mockResolvedValue(undefined),
     publishEvent: vi.fn().mockResolvedValue(undefined),
+    openSeating: vi.fn().mockResolvedValue(undefined),
     syncRoles: vi.fn().mockResolvedValue(undefined),
     finalizeEvent: vi.fn().mockResolvedValue(undefined),
     archiveEvent: vi.fn().mockResolvedValue(undefined),
@@ -208,6 +210,54 @@ describe("scheduled orchestration", () => {
     expect(report.actions[0]).toMatchObject({ action: "create", status: "skipped" });
   });
 
+
+  it("refreshes the signup card when the separate player stage opens", async () => {
+    const playerOpen = event("open", {
+      playerSignupOpensAt: now - 1,
+      signupLocksAt: now + 60_000,
+    });
+    const repository = schedulerRepository({
+      listEventsForScheduler: vi.fn().mockResolvedValue([playerOpen]),
+    });
+    const handler = callbacks();
+
+    const report = await runScheduledTick(repository, handler, now);
+
+    expect(handler.openPlayerSignups).toHaveBeenCalledWith(playerOpen);
+    expect(report.actions).toContainEqual(
+      expect.objectContaining({
+        action: "player-open",
+        entityId: playerOpen.eventId,
+        status: "succeeded",
+      }),
+    );
+  });
+
+  it("announces open seating once through a persisted scheduler operation", async () => {
+    const published = event("published", {
+      openSeatingAt: now - 1,
+      tableSelectionClosesAt: now + 60_000,
+    });
+    const repository = schedulerRepository({
+      listSchedulingGuilds: vi.fn().mockResolvedValue([
+        config({ roleSyncEnabled: false }),
+      ]),
+      listEventsForScheduler: vi.fn().mockResolvedValue([published]),
+    });
+    const handler = callbacks();
+
+    const report = await runScheduledTick(repository, handler, now);
+
+    expect(handler.openSeating).toHaveBeenCalledWith(published);
+    expect(repository.beginOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationKey: schedulerOperationKey("open-seating", published.eventId),
+      }),
+    );
+    expect(report.actions).toContainEqual(
+      expect.objectContaining({ action: "open-seating", status: "succeeded" }),
+    );
+  });
   it("isolates failures and continues to later reminders", async () => {
     const repository = schedulerRepository({
       listEventsForScheduler: vi.fn().mockResolvedValue([event("open")]),
