@@ -16,7 +16,7 @@ In Review mode, most of the week is automatic and one decision remains yours:
 2. At table-planning time, it locks the signup snapshot and prepares a private
    draft.
 3. Run `/week status`. Check the selected GMs, table sizes, reserved players,
-   and global waitlist.
+   per-tier reservations and waitlists.
 4. If the draft is sound, run `/week publish`.
 5. The bot handles table choices, open seating, the final roster, and archive.
 
@@ -39,9 +39,10 @@ it is safer than guessing from an old Discord message.
 Review the draft for:
 
 - enough GMs for the player count;
+- the expected GM and player counts in each tier;
 - sensible table capacities;
 - the expected GM rotation result;
-- players marked reserved versus global-waitlist; and
+- players marked reserved versus waitlisted in each tier; and
 - any warning or failed operation.
 
 If one table needs a different name, capacity, or eligible GM, use

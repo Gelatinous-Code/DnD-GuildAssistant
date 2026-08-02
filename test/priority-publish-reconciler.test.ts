@@ -49,6 +49,7 @@ function assignment(assignmentId: string, planId: string): Assignment {
     desiredTableId: "table-1",
     userId: "user-1",
     displayName: "Player",
+    gameTier: 1,
     status: "assigned",
     waitlistPosition: null,
     assignedAt: NOW - 4_000,

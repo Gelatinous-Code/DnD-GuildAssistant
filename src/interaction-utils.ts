@@ -4,6 +4,7 @@ import {
   type DiscordInteraction,
   type DiscordInteractionOption,
 } from "./discord";
+import { isGameTier, type GameTier } from "./domain/game-tier";
 
 const ADMINISTRATOR = 1n << 3n;
 const MANAGE_GUILD = 1n << 5n;
@@ -118,7 +119,12 @@ export class UserFacingError extends Error {
 }
 
 export type GuildComponent =
-  | { kind: "signup"; action: "gm" | "player" | "withdraw"; eventId: string }
+  | {
+      kind: "signup";
+      action: "gm" | "player" | "backup" | "withdraw";
+      eventId: string;
+      gameTier?: GameTier;
+    }
   | { kind: "table"; action: "join" | "leave"; planId: string; tableId: string }
   | {
       kind: "priority";
@@ -132,10 +138,28 @@ export function parseComponentId(customId: string | undefined): GuildComponent |
   if (!customId) return undefined;
   const parts = customId.split(":");
   if (
+    parts.length === 5 &&
+    parts[0] === "guild" &&
+    parts[1] === "signup" &&
+    (parts[2] === "gm" || parts[2] === "player") &&
+    isGameTier(Number(parts[3])) &&
+    parts[4]
+  ) {
+    return {
+      kind: "signup",
+      action: parts[2],
+      gameTier: Number(parts[3]) as GameTier,
+      eventId: parts[4],
+    };
+  }
+  if (
     parts.length === 4 &&
     parts[0] === "guild" &&
     parts[1] === "signup" &&
-    (parts[2] === "gm" || parts[2] === "player" || parts[2] === "withdraw") &&
+    (parts[2] === "gm" ||
+      parts[2] === "player" ||
+      parts[2] === "backup" ||
+      parts[2] === "withdraw") &&
     parts[3]
   ) {
     return { kind: "signup", action: parts[2], eventId: parts[3] };

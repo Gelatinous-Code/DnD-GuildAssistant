@@ -67,6 +67,8 @@ function signup(
     userId,
     displayName,
     signupKind,
+    gameTier: 1,
+    gmCommitment: signupKind === "gm" ? "primary" : null,
     status: "active",
     source: "native",
     sourceExternalId: null,
@@ -108,6 +110,7 @@ function table(
     tableId,
     planId: "plan-2",
     tableNumber,
+    gameTier: 1,
     title,
     capacity: 4,
     gmUserId,
@@ -131,6 +134,7 @@ function assignment(
     desiredTableId: null,
     userId,
     displayName,
+    gameTier: 1,
     status,
     waitlistPosition: null,
     assignedAt: null,
@@ -244,7 +248,7 @@ describe("weekly roster CSV", () => {
       planBundle: null,
     });
 
-    expect(result.text).toContain(",gm,active,native,");
+    expect(result.text).toContain(",gm,1,primary,active,native,");
     expect(result.text).toContain(",not_planned,,");
     expect(result.text).toContain(",,unassigned,");
   });

@@ -573,6 +573,80 @@ describe("Discord message rendering", () => {
   });
 
 
+  it("renders weekly tier snapshots with GM, backup, player, and withdrawal controls", () => {
+    const message = renderSignupMessage({
+      eventId: "event-tiered",
+      title: "Tuesday Games",
+      startsAt,
+      status: "open",
+      tierSignups: [
+        { gameTier: 1, gmNames: ["GM One"], playerNames: ["Player One"] },
+        { gameTier: 2, gmNames: [], playerNames: ["Player Two"] },
+        { gameTier: 3, gmNames: [], playerNames: [] },
+      ],
+      backupGmNames: ["Backup One"],
+    });
+
+    expect(message.embeds?.[0].fields?.map((field) => field.name)).toEqual([
+      "Tier 1 · Levels 3–4",
+      "Tier 2 · Levels 5–7",
+      "Tier 3 · Levels 8+",
+      "Backup GMs (1)",
+    ]);
+    expect(message.components).toHaveLength(2);
+    expect(message.components?.[0].components.map((button) => button.custom_id)).toEqual([
+      "guild:signup:gm:1:event-tiered",
+      "guild:signup:gm:2:event-tiered",
+      "guild:signup:gm:3:event-tiered",
+      "guild:signup:backup:event-tiered",
+      "guild:signup:withdraw:event-tiered",
+    ]);
+    expect(message.components?.[1].components.map((button) => button.custom_id)).toEqual([
+      "guild:signup:player:1:event-tiered",
+      "guild:signup:player:2:event-tiered",
+      "guild:signup:player:3:event-tiered",
+    ]);
+  });
+
+  it("focuses tier fields and controls for separate GM and player posts", () => {
+    const shared = {
+      eventId: "event-tiered",
+      title: "Tuesday Games",
+      startsAt,
+      status: "open" as const,
+      tierSignups: [
+        { gameTier: 1 as const, gmNames: ["GM One"], playerNames: ["Player One"] },
+        { gameTier: 2 as const, gmNames: [], playerNames: ["Player Two"] },
+        { gameTier: 3 as const, gmNames: [], playerNames: [] },
+      ],
+      backupGmNames: ["Backup One"],
+    };
+
+    const gmCard = renderSignupMessage({ ...shared, audience: "gm" });
+    const playerCard = renderSignupMessage({ ...shared, audience: "player" });
+
+    expect(gmCard.embeds?.[0]?.fields?.map((field) => field.name)).toEqual([
+      "Tier 1 · Levels 3–4",
+      "Tier 2 · Levels 5–7",
+      "Tier 3 · Levels 8+",
+      "Backup GMs (1)",
+    ]);
+    expect(gmCard.embeds?.[0]?.fields?.[0]?.value).toBe("**GMs (1):** GM One");
+    expect(gmCard.components?.[0]?.components.map((button) => button.label)).toEqual([
+      "Run T1", "Run T2", "Run T3", "Backup GM", "Withdraw",
+    ]);
+
+    expect(playerCard.embeds?.[0]?.fields?.map((field) => field.name)).toEqual([
+      "Tier 1 · Levels 3–4",
+      "Tier 2 · Levels 5–7",
+      "Tier 3 · Levels 8+",
+    ]);
+    expect(playerCard.embeds?.[0]?.fields?.[0]?.value).toBe("**Players (1):** Player One");
+    expect(playerCard.components?.[0]?.components.map((button) => button.label)).toEqual([
+      "Play T1", "Play T2", "Play T3", "Withdraw",
+    ]);
+  });
+
   it("disables signup actions when locked and removes them when archived", () => {
     const locked = renderSignupMessage({
       eventId: "event-1",

@@ -48,6 +48,11 @@ These require **Manage Server**.
 | `/week cancel` | Cancel a week with an audit reason. |
 | `/week archive` | Close the completed week and reconcile bot-owned roles. |
 
+For `/week signup`, **GM** and **Player** corrections require **Tier 1**, **Tier
+2**, or **Tier 3**. **Backup GM** records emergency coverage without adding a
+planned table; **Withdraw** removes the member from the week. See
+[Weekly game tiers](game-tiers.md).
+
 ## Attendance and DM rewards
 
 These require **Manage Server**.

@@ -20,7 +20,7 @@ export {
   type WeeklyExportLimit,
 } from "./weekly-export-contract";
 
-export const WEEKLY_ROSTER_SCHEMA_VERSION = "weekly-roster-v1" as const;
+export const WEEKLY_ROSTER_SCHEMA_VERSION = "weekly-roster-v2" as const;
 export const WEEKLY_ROSTER_CONTENT_TYPE = "text/csv; charset=utf-8" as const;
 
 export const WEEKLY_ROSTER_COLUMNS = [
@@ -38,6 +38,8 @@ export const WEEKLY_ROSTER_COLUMNS = [
   "user_id",
   "display_name",
   "signup_kind",
+  "game_tier",
+  "gm_commitment",
   "signup_status",
   "signup_source",
   "signed_up_at",
@@ -301,6 +303,8 @@ function rowFor(snapshot: WeeklyRosterSnapshot, record: RosterRecord): WeeklyRos
     user_id: signup.userId,
     display_name: signup.displayName,
     signup_kind: signup.signupKind,
+    game_tier: signup.gameTier === null ? "" : String(signup.gameTier),
+    gm_commitment: signup.gmCommitment ?? "",
     signup_status: signup.status,
     signup_source: signup.source,
     signed_up_at: timestamp(signup.signedUpAt),

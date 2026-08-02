@@ -14,6 +14,7 @@ import {
   type PrioritySeatingRepository,
 } from "./storage/priority-seating-repository";
 import type { WeekService } from "./week-service";
+import { gameTierLabel } from "./domain/game-tier";
 
 export interface PriorityTableContext {
   event: WeeklyEvent;
@@ -91,6 +92,19 @@ export class PriorityWorkflowService {
     if (!assignment || assignment.status === "withdrawn") {
       throw new UserFacingError(
         "Your player signup is not present in this table plan. Ask an organizer to refresh it.",
+      );
+    }
+    const tierAssignment = bundle.assignments.find(
+      (candidate) => candidate.userId === input.userId,
+    );
+    if (!tierAssignment) {
+      throw new UserFacingError(
+        "Your tier reservation is not present in this table plan. Ask an organizer to refresh it.",
+      );
+    }
+    if (tierAssignment.gameTier !== table.gameTier) {
+      throw new UserFacingError(
+        `Your weekly signup is ${gameTierLabel(tierAssignment.gameTier)}. Priority tokens can only protect a table in that tier.`,
       );
     }
     const occupied = bundle.assignments.filter(

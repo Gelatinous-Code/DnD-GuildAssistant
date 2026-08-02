@@ -1,3 +1,9 @@
+import {
+  GAME_TIER_DEFINITIONS,
+  type GameTier,
+  gameTierLabel,
+} from "./domain/game-tier";
+
 const DISCORD_API_BASE_URL = "https://discord.com/api/v10";
 const MAX_ERROR_BODY_LENGTH = 16_384;
 const MAX_ROLE_MENTIONS = 100;
@@ -613,10 +619,16 @@ function componentId(parts: readonly string[]): string {
   return customId;
 }
 
-export type SignupAction = "gm" | "player" | "withdraw";
+export type SignupAction = "gm" | "player" | "backup" | "withdraw";
 
-export function signupCustomId(eventId: string, action: SignupAction): string {
-  return componentId(["guild", "signup", action, eventId]);
+export function signupCustomId(
+  eventId: string,
+  action: SignupAction,
+  gameTier?: GameTier,
+): string {
+  return gameTier === undefined
+    ? componentId(["guild", "signup", action, eventId])
+    : componentId(["guild", "signup", action, String(gameTier), eventId]);
 }
 
 export type TableAction = "join" | "leave";
@@ -645,11 +657,21 @@ export interface SignupMessageInput {
   withdrawEnabled?: boolean;
   gmNames?: readonly string[];
   playerNames?: readonly string[];
+  tierSignups?: readonly {
+    gameTier: GameTier;
+    gmNames: readonly string[];
+    playerNames: readonly string[];
+  }[];
+  backupGmNames?: readonly string[];
+  unclassifiedNames?: readonly string[];
 }
 
 export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePayload {
   const gmNames = input.gmNames ?? [];
   const playerNames = input.playerNames ?? [];
+  const tierSignups = input.tierSignups;
+  const backupGmNames = input.backupGmNames ?? [];
+  const unclassifiedNames = input.unclassifiedNames ?? [];
   const stageOpen = input.status === "open";
   const gmSignupEnabled = input.gmSignupEnabled ?? stageOpen;
   const playerSignupEnabled = input.playerSignupEnabled ?? stageOpen;
@@ -679,26 +701,58 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
           4096,
         ),
         color: input.status === "open" ? 0x57f287 : input.status === "locked" ? 0xfee75c : 0x99aab5,
-        fields: [
-          ...(audience === "player" ? [] : [{
-            name: `Game Masters (${gmNames.length})`,
-            value: displayList(gmNames),
-            inline: true,
-          }]),
-          ...(audience === "gm" ? [] : [{
-            name: `Players (${playerNames.length})`,
-            value: displayList(playerNames),
-            inline: true,
-          }]),
-        ],
+        fields: tierSignups
+          ? [
+              ...tierSignups.map((tier) => ({
+                name: gameTierLabel(tier.gameTier),
+                value: [
+                  ...(audience === "player"
+                    ? []
+                    : [`**GMs (${tier.gmNames.length}):** ${tier.gmNames.length ? tier.gmNames.map(escapeMarkdown).join(", ") : "None yet"}`]),
+                  ...(audience === "gm"
+                    ? []
+                    : [`**Players (${tier.playerNames.length}):** ${tier.playerNames.length ? tier.playerNames.map(escapeMarkdown).join(", ") : "None yet"}`]),
+                ].join("\n").slice(0, 1024),
+              })),
+              ...(audience === "player"
+                ? []
+                : [{
+                    name: `Backup GMs (${backupGmNames.length})`,
+                    value: displayList(backupGmNames),
+                  }]),
+              ...(unclassifiedNames.length
+                ? [{
+                    name: `Needs a tier (${unclassifiedNames.length})`,
+                    value: displayList(unclassifiedNames),
+                  }]
+                : []),
+            ]
+          : [
+              ...(audience === "player" ? [] : [{
+                name: `Game Masters (${gmNames.length})`,
+                value: displayList(gmNames),
+                inline: true,
+              }]),
+              ...(audience === "gm" ? [] : [{
+                name: `Players (${playerNames.length})`,
+                value: displayList(playerNames),
+                inline: true,
+              }]),
+            ],
         footer: {
           text:
             input.status === "archived"
               ? "This week is closed."
+              : audience === "gm" && gmSignupEnabled
+                ? "Choose the tier you plan to run. Backup GMs do not count toward player capacity."
+                : audience === "player" && playerSignupEnabled
+                  ? "Choose your character's tier. Picking another tier updates this week's signup."
+                  : audience === "player" && input.status === "open"
+                    ? "Player signup is not open yet."
               : gmSignupEnabled && !playerSignupEnabled
                 ? "GM signup is open. Player signup opens at the time shown above."
                 : gmSignupEnabled || playerSignupEnabled
-                  ? "Choose one signup type below. Withdraw if you cannot play this week."
+                  ? "Choose your tier for this week. Picking another tier updates your signup."
                   : withdrawEnabled
                     ? "Tables are published. Withdraw only if you are dropping from this week's games."
                     : "Signups and withdrawals are closed for this week.",
@@ -708,7 +762,57 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
     components:
       input.status === "archived"
         ? []
-        : [
+        : tierSignups
+          ? [
+              ...(audience === "player" ? [] : [{
+                type: ComponentType.ActionRow,
+                components: [
+                  ...GAME_TIER_DEFINITIONS.map((definition) => ({
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Primary,
+                    custom_id: signupCustomId(input.eventId, "gm", definition.tier),
+                    label: `Run T${definition.tier}`,
+                    disabled: !gmSignupEnabled,
+                  })),
+                  {
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Secondary,
+                    custom_id: signupCustomId(input.eventId, "backup"),
+                    label: "Backup GM",
+                    disabled: !gmSignupEnabled,
+                  },
+                  {
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Danger,
+                    custom_id: signupCustomId(input.eventId, "withdraw"),
+                    label: "Withdraw",
+                    disabled: !withdrawEnabled,
+                  },
+                ],
+              }]),
+              ...(audience === "gm" ? [] : [{
+                type: ComponentType.ActionRow,
+                components: [
+                  ...GAME_TIER_DEFINITIONS.map((definition) => ({
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Success,
+                    custom_id: signupCustomId(input.eventId, "player", definition.tier),
+                    label: `Play T${definition.tier}`,
+                    disabled: !playerSignupEnabled,
+                  })),
+                  ...(audience === "player"
+                    ? [{
+                        type: ComponentType.Button,
+                        style: ButtonStyle.Danger,
+                        custom_id: signupCustomId(input.eventId, "withdraw"),
+                        label: "Withdraw",
+                        disabled: !withdrawEnabled,
+                      }]
+                    : []),
+                ],
+              }]),
+            ]
+          : [
             {
               type: ComponentType.ActionRow,
               components: [
@@ -749,6 +853,7 @@ export interface TableSummaryInput {
   capacity: number;
   players: readonly string[];
   gameTitle?: string;
+  gameTier?: GameTier;
 }
 
 export interface PlanPreviewInput {
@@ -938,6 +1043,7 @@ export function renderPublishedTable(input: PublishedTableInput): DiscordMessage
             `**Event:** ${escapeMarkdown(input.eventTitle)}`,
             `**When:** ${discordTimestamp(input.startsAt)} (${discordTimestamp(input.startsAt, "R")})`,
             input.gameTitle ? `**Game:** ${escapeMarkdown(input.gameTitle)}` : undefined,
+            input.gameTier ? `**Tier:** ${gameTierLabel(input.gameTier)}` : undefined,
             `**Seats:** ${input.players.length}/${input.capacity}${full ? " (full)" : ""}`,
           ]
             .filter(Boolean)

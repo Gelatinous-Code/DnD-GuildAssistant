@@ -72,6 +72,7 @@ import {
   generateWeeklyRosterCsv,
   WeeklyExportLimitError,
 } from "./weekly-export";
+import { isGameTier } from "./domain/game-tier";
 
 const WEEKDAY_NAMES = [
   "",
@@ -183,8 +184,8 @@ function setupDashboard(config: GuildConfig | null): string {
     `✅ **Tables:** ${config?.tableMinSize ?? 4} minimum / ${
       config?.tablePreferredSize ?? 6
     } preferred / ${config?.tableMaxSize ?? 6} maximum`,
-    "**Player capacity:** signup order reserves available seats. Extra players form one global waitlist.",
-    "**Drops:** before open seating, the first waitlisted player inherits the reservation and receives a private message.",
+    "**Player capacity:** each tier reserves its own seats in signup order. Extra players wait within that tier.",
+    "**Drops:** before open seating, the first waitlisted player in the same tier inherits the reservation and receives a private message.",
     "**No table chosen:** no penalty; at open seating, every remaining spot is first-come until game time.",
     `${config?.gmRoleId ? "✅" : "➖"} **Weekly GM role (optional):** ${
       config?.gmRoleId ? `<@&${config.gmRoleId}>` : "not configured"
@@ -209,8 +210,8 @@ function helpContent(interaction: DiscordInteraction): string {
   if (topic === "gm") {
     return [
       "## Running a game",
-      "1. When GM signup opens, click **Run a Game** on the weekly post.",
-      "2. Volunteering does not guarantee selection; the bot uses the guild's fair rotation and the number of players.",
+      "1. When GM signup opens, click **Run T1**, **Run T2**, or **Run T3** for the tier you will run. Choose **Backup GM** if you can cover a late absence without opening another table.",
+      "2. A tiered GM signup does not guarantee selection; the bot plans each tier from its players, available GMs, and the guild's fair rotation.",
       "3. If your availability changes, click **Withdraw** and tell an organizer.",
       "4. After the game, an organizer confirms whether your table ran and records only roster changes.",
       "",
@@ -252,9 +253,9 @@ function helpContent(interaction: DiscordInteraction): string {
 
   return [
     "## Playing this week",
-    "1. Click **Play** on the newest weekly signup post.",
+    "1. Click **Play T1**, **Play T2**, or **Play T3** for your character's tier on the newest weekly signup post.",
     "2. When tables appear, click **Join** on the table you want.",
-    "3. If that table is full, the bot places you on its waitlist. If all weekly places were already reserved, it explains the global waitlist.",
+    "3. If that table is full, the bot places you on its waitlist. If all places in your tier were already reserved, it explains your tier's weekly waitlist.",
     "4. At open seating, any still-free places become first-come, first-served.",
     "",
     "**Leave Table** clears only your table choice; you are still signed up for the week.",
@@ -476,7 +477,7 @@ function setupSummary(config: GuildConfig): string {
       " for " + config.eventDurationMinutes + " minutes",
     "**Table sizes:** " + config.tableMinSize + " / " +
       config.tablePreferredSize + " / " + config.tableMaxSize,
-    "**Player capacity:** signup-order reservations, one global waitlist, then first-come open seating.",
+    "**Player capacity:** signup-order reservations and waitlists are separate for each tier, followed by first-come open seating within that tier.",
     "**Weekly GM role:** " +
       (config.gmRoleId ? "<@&" + config.gmRoleId + ">" : "optional; not configured"),
     "**Reminder role:** " +
@@ -733,7 +734,7 @@ async function handleGuildCommand(
         guildId,
         channelId: reminderChannelId,
         roleId: config.reminderRoleId ?? undefined,
-        template: "Please choose Run a Game or Play before signups close. We have {players} players and {gms} GMs.",
+        template: "Please choose your Run T# or Play T# button before signups close. Backup GMs can choose Backup GM. We have {players} players and {gms} planned GMs.",
         minutesBeforeLock: 48 * 60,
         enabled: reminderEnabled,
       });
@@ -923,8 +924,18 @@ async function handleWeekCommand(
   if (invocation.subcommand === "signup") {
     const userId = stringOption(invocation, "member");
     const action = stringOption(invocation, "kind");
-    if (!userId || (action !== "gm" && action !== "player" && action !== "withdraw")) {
+    const tier = numberOption(invocation, "tier");
+    if (
+      !userId ||
+      (action !== "gm" &&
+        action !== "backup" &&
+        action !== "player" &&
+        action !== "withdraw")
+    ) {
       throw new UserFacingError("member and a valid kind are required.");
+    }
+    if ((action === "gm" || action === "player") && !isGameTier(tier)) {
+      throw new UserFacingError("Choose Tier 1, Tier 2, or Tier 3 for a GM or player correction.");
     }
     let displayName = userId;
     try {
@@ -945,6 +956,7 @@ async function handleWeekCommand(
       userId,
       displayName,
       action,
+      gameTier: isGameTier(tier) ? tier : undefined,
     });
     let automationText = "";
     let correctionWarning = result.warning;
@@ -1380,7 +1392,7 @@ async function handleReminderCommand(
     const event = await repository.getCurrentWeeklyEvent(guildId);
     const counts = event
       ? await repository.countActiveSignups(event.eventId)
-      : { gms: 0, players: 0 };
+      : { gms: 0, gmBackups: 0, players: 0 };
     const capacity = reminderCapacitySummary(counts, config.tableMaxSize);
     const rendered = renderReminderTemplate(rule.messageTemplate, {
       event: event?.title ?? "Next weekly game",
@@ -1452,12 +1464,21 @@ async function handleComponent(
   const { week } = services(env);
 
   if (component.kind === "signup") {
+    if (
+      (component.action === "gm" || component.action === "player") &&
+      component.gameTier === undefined
+    ) {
+      throw new UserFacingError(
+        "This signup button is outdated. Use the newest signup post and choose Tier 1, Tier 2, or Tier 3.",
+      );
+    }
     const result = await week.changeSignup({
       guildId,
       eventId: component.eventId,
       userId,
       displayName: invokingDisplayName(interaction),
       action: component.action,
+      gameTier: component.gameTier,
     });
     await week.refreshSignupPosts(result.event);
     return ephemeral("✅ " + result.message);

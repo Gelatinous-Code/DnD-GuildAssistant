@@ -22,6 +22,7 @@ function notification(
     recipientUserId: "123456789012345678",
     displayName: "Chappy",
     eventTitle: "Weekly Games",
+    gameTier: 1,
     openSeatingAt: Date.parse("2026-08-10T23:00:00Z"),
     eventStartsAt: Date.parse("2026-08-12T00:00:00Z"),
     attemptCount: 0,
@@ -71,7 +72,7 @@ describe("RosterNotificationService", () => {
     expect(test.discord.sendDirectMessage).toHaveBeenCalledWith(
       test.item.recipientUserId,
       expect.objectContaining({
-        content: expect.stringContaining("first on the global waitlist"),
+        content: expect.stringContaining("first on the Tier 1"),
         allowed_mentions: {
           parse: [],
           roles: [],

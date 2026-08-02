@@ -706,12 +706,12 @@ describe("manual reminders", () => {
 
 describe("capacity summaries", () => {
   it("uses only aggregate counts for admin-safe risk reporting", () => {
-    expect(reminderCapacitySummary({ players: 7, gms: 0 }, 6)).toEqual({
+    expect(reminderCapacitySummary({ players: 7, gms: 0, gmBackups: 0 }, 6)).toEqual({
       openSeats: 0,
       atRisk: true,
       summary: "Capacity risk: 7 players and 0 GMs; at least one GM is needed.",
     });
-    expect(reminderCapacitySummary({ players: 13, gms: 2 }, 6)).toEqual({
+    expect(reminderCapacitySummary({ players: 13, gms: 2, gmBackups: 0 }, 6)).toEqual({
       openSeats: 0,
       atRisk: true,
       summary:

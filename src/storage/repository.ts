@@ -4,6 +4,7 @@ import {
   WEEKLY_ROSTER_MAX_TABLES,
   WeeklyExportLimitError,
 } from "../weekly-export-contract";
+import type { GameTier } from "../domain/game-tier";
 
 export type EventStatus =
   | "draft"
@@ -15,6 +16,7 @@ export type EventStatus =
   | "cancelled";
 
 export type SignupKind = "gm" | "player";
+export type GmCommitment = "primary" | "backup";
 export type SignupStatus = "active" | "withdrawn";
 export type SignupSource = "native" | "raid_helper" | "import" | "admin";
 export type PlanStatus = "draft" | "published" | "superseded";
@@ -170,6 +172,8 @@ export interface Signup {
   userId: string;
   displayName: string;
   signupKind: SignupKind;
+  gameTier: GameTier | null;
+  gmCommitment: GmCommitment | null;
   status: SignupStatus;
   source: SignupSource;
   sourceExternalId: string | null;
@@ -183,6 +187,8 @@ export interface SaveSignupInput {
   userId: string;
   displayName: string;
   signupKind: SignupKind;
+  gameTier?: GameTier | null;
+  gmCommitment?: GmCommitment | null;
   source?: SignupSource;
   sourceExternalId?: string;
   signedUpAt?: number;
@@ -191,6 +197,7 @@ export interface SaveSignupInput {
 export interface SignupCounts {
   players: number;
   gms: number;
+  gmBackups: number;
 }
 
 export interface Plan {
@@ -215,6 +222,7 @@ export interface PlanTable {
   tableId: string;
   planId: string;
   tableNumber: number;
+  gameTier: GameTier;
   title: string;
   capacity: number;
   gmUserId: string;
@@ -231,6 +239,7 @@ export interface Assignment {
   desiredTableId: string | null;
   userId: string;
   displayName: string;
+  gameTier: GameTier;
   status: AssignmentStatus;
   waitlistPosition: number | null;
   assignedAt: number | null;
@@ -290,6 +299,7 @@ export interface RosterPromotionNotification {
   recipientUserId: string;
   displayName: string;
   eventTitle: string;
+  gameTier: GameTier;
   openSeatingAt: number;
   eventStartsAt: number;
   attemptCount: number;
@@ -484,6 +494,8 @@ type SignupRow = {
   user_id: string;
   display_name: string;
   signup_kind: SignupKind;
+  game_tier: GameTier | null;
+  gm_commitment: GmCommitment | null;
   status: SignupStatus;
   source: SignupSource;
   source_external_id: string | null;
@@ -514,6 +526,7 @@ type PlanTableRow = {
   table_id: string;
   plan_id: string;
   table_number: number;
+  game_tier: GameTier;
   title: string;
   capacity: number;
   gm_user_id: string;
@@ -530,6 +543,7 @@ type AssignmentRow = {
   desired_table_id: string | null;
   user_id: string;
   display_name: string;
+  game_tier: GameTier;
   status: AssignmentStatus;
   waitlist_position: number | null;
   assigned_at: number | null;
@@ -723,6 +737,8 @@ function signupFromRow(row: SignupRow): Signup {
     userId: row.user_id,
     displayName: row.display_name,
     signupKind: row.signup_kind,
+    gameTier: row.game_tier,
+    gmCommitment: row.gm_commitment,
     status: row.status,
     source: row.source,
     sourceExternalId: row.source_external_id,
@@ -757,6 +773,7 @@ function tableFromRow(row: PlanTableRow): PlanTable {
     tableId: row.table_id,
     planId: row.plan_id,
     tableNumber: row.table_number,
+    gameTier: row.game_tier,
     title: row.title,
     capacity: row.capacity,
     gmUserId: row.gm_user_id,
@@ -775,6 +792,7 @@ function assignmentFromRow(row: AssignmentRow): Assignment {
     desiredTableId: row.desired_table_id,
     userId: row.user_id,
     displayName: row.display_name,
+    gameTier: row.game_tier,
     status: row.status,
     waitlistPosition: row.waitlist_position,
     assignedAt: row.assigned_at,
@@ -1351,11 +1369,14 @@ export class GuildRepository {
       .prepare(
         `INSERT INTO signups (
            event_id, user_id, display_name, signup_kind, status, source,
-           source_external_id, signed_up_at, withdrawn_at, updated_at
-         ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, NULL, ?)
+           source_external_id, signed_up_at, withdrawn_at, updated_at,
+           game_tier, gm_commitment
+         ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, NULL, ?, ?, ?)
          ON CONFLICT(event_id, user_id) DO UPDATE SET
            display_name = excluded.display_name,
            signup_kind = excluded.signup_kind,
+           game_tier = excluded.game_tier,
+           gm_commitment = excluded.gm_commitment,
            status = 'active',
            source = excluded.source,
            source_external_id = excluded.source_external_id,
@@ -1372,6 +1393,8 @@ export class GuildRepository {
         asNullable(input.sourceExternalId),
         now,
         now,
+        input.gameTier ?? null,
+        input.gmCommitment ?? null,
       )
       .run();
     const signup = await this.getSignup(input.eventId, input.userId);
@@ -1436,14 +1459,21 @@ export class GuildRepository {
   async countActiveSignups(eventId: string): Promise<SignupCounts> {
     const row = await this.db
       .prepare(
-        `SELECT
+         `SELECT
            SUM(CASE WHEN signup_kind = 'player' THEN 1 ELSE 0 END) AS players,
-           SUM(CASE WHEN signup_kind = 'gm' THEN 1 ELSE 0 END) AS gms
-         FROM signups WHERE event_id = ? AND status = 'active'`,
+           SUM(CASE WHEN signup_kind = 'gm'
+             AND COALESCE(gm_commitment, 'primary') = 'primary' THEN 1 ELSE 0 END) AS gms,
+           SUM(CASE WHEN signup_kind = 'gm'
+             AND gm_commitment = 'backup' THEN 1 ELSE 0 END) AS gm_backups
+          FROM signups WHERE event_id = ? AND status = 'active'`,
       )
       .bind(eventId)
-      .first<{ players: number | null; gms: number | null }>();
-    return { players: row?.players ?? 0, gms: row?.gms ?? 0 };
+      .first<{ players: number | null; gms: number | null; gm_backups: number | null }>();
+    return {
+      players: row?.players ?? 0,
+      gms: row?.gms ?? 0,
+      gmBackups: row?.gm_backups ?? 0,
+    };
   }
 
   async getNextPlanGeneration(eventId: string): Promise<number> {
@@ -1491,6 +1521,7 @@ export class GuildRepository {
         input.tables.map((table) => ({
           tableId: table.tableId,
           tableNumber: table.tableNumber,
+          gameTier: table.gameTier,
           title: table.title,
           capacity: table.capacity,
           gmUserId: table.gmUserId,
@@ -1502,14 +1533,15 @@ export class GuildRepository {
       statements.push(
         this.db
           .prepare(
-            `INSERT INTO plan_tables (
-               table_id, plan_id, table_number, title, capacity, gm_user_id,
+             `INSERT INTO plan_tables (
+               table_id, plan_id, table_number, game_tier, title, capacity, gm_user_id,
                gm_display_name, channel_id, message_id, created_at
              )
              SELECT
-               json_extract(value, '$.tableId'), ?,
-               json_extract(value, '$.tableNumber'),
-               json_extract(value, '$.title'),
+                json_extract(value, '$.tableId'), ?,
+                json_extract(value, '$.tableNumber'),
+                json_extract(value, '$.gameTier'),
+                json_extract(value, '$.title'),
                json_extract(value, '$.capacity'),
                json_extract(value, '$.gmUserId'),
                json_extract(value, '$.gmDisplayName'),
@@ -1529,6 +1561,7 @@ export class GuildRepository {
           desiredTableId: assignment.desiredTableId ?? assignment.tableId,
           userId: assignment.userId,
           displayName: assignment.displayName,
+          gameTier: assignment.gameTier,
           status: assignment.status,
           waitlistPosition: assignment.waitlistPosition,
           rosterStatus: assignment.rosterStatus ?? null,
@@ -1540,18 +1573,19 @@ export class GuildRepository {
       statements.push(
         this.db
           .prepare(
-            `INSERT INTO assignments (
+             `INSERT INTO assignments (
                assignment_id, plan_id, table_id, desired_table_id, user_id,
-               display_name, status, waitlist_position, roster_status,
+               display_name, game_tier, status, waitlist_position, roster_status,
                roster_rank, assigned_at, updated_at
              )
              SELECT
                json_extract(value, '$.assignmentId'), ?,
                json_extract(value, '$.tableId'),
                json_extract(value, '$.desiredTableId'),
-               json_extract(value, '$.userId'),
-               json_extract(value, '$.displayName'),
-               json_extract(value, '$.status'),
+                json_extract(value, '$.userId'),
+                json_extract(value, '$.displayName'),
+                json_extract(value, '$.gameTier'),
+                json_extract(value, '$.status'),
                json_extract(value, '$.waitlistPosition'),
                json_extract(value, '$.rosterStatus'),
                json_extract(value, '$.rosterRank'),
@@ -1776,8 +1810,9 @@ export class GuildRepository {
     const staleBefore = now - DEFAULT_REMINDER_LEASE_MS;
     const result = await this.db
       .prepare(
-        `SELECT assignment.assignment_id, event.guild_id, event.event_id,
-           plan.plan_id, assignment.user_id, assignment.display_name,
+         `SELECT assignment.assignment_id, event.guild_id, event.event_id,
+            plan.plan_id, assignment.user_id, assignment.display_name,
+            assignment.game_tier,
            event.title, COALESCE(event.open_seating_at, event.signup_locks_at)
              AS open_seating_at,
            event.starts_at, assignment.roster_notification_attempt_count
@@ -1805,6 +1840,7 @@ export class GuildRepository {
         plan_id: string;
         user_id: string;
         display_name: string;
+        game_tier: GameTier;
         title: string;
         open_seating_at: number;
         starts_at: number;
@@ -1818,6 +1854,7 @@ export class GuildRepository {
       recipientUserId: row.user_id,
       displayName: row.display_name,
       eventTitle: row.title,
+      gameTier: row.game_tier,
       openSeatingAt: row.open_seating_at,
       eventStartsAt: row.starts_at,
       attemptCount: row.roster_notification_attempt_count,
@@ -1915,25 +1952,31 @@ export class GuildRepository {
     await this.db.batch([
       this.db
         .prepare(
-          `INSERT OR IGNORE INTO assignments (
-             assignment_id, plan_id, table_id, desired_table_id, user_id,
-             display_name, status, waitlist_position, roster_status, roster_rank,
-             assigned_at, updated_at
-           )
-           SELECT ?, ?, NULL, NULL, ?, ?, 'unassigned', NULL,
-             CASE WHEN (
-               SELECT COUNT(*) FROM assignments reserved
-               WHERE reserved.plan_id = ? AND reserved.roster_status = 'reserved'
-                 AND reserved.status <> 'withdrawn'
-             ) < COALESCE((SELECT SUM(capacity) FROM plan_tables WHERE plan_id = ?), 0)
-               THEN 'reserved' ELSE 'bench' END,
-             COALESCE((SELECT MAX(roster_rank) FROM assignments WHERE plan_id = ?), 0) + 1,
+           `INSERT OR IGNORE INTO assignments (
+              assignment_id, plan_id, table_id, desired_table_id, user_id,
+              display_name, game_tier, status, waitlist_position, roster_status, roster_rank,
+              assigned_at, updated_at
+            )
+            SELECT ?, ?, NULL, NULL, ?, ?, signup.game_tier, 'unassigned', NULL,
+              CASE WHEN (
+                SELECT COUNT(*) FROM assignments reserved
+                WHERE reserved.plan_id = ? AND reserved.roster_status = 'reserved'
+                  AND reserved.status <> 'withdrawn'
+                  AND COALESCE(reserved.game_tier, 0) =
+                      COALESCE(signup.game_tier, 0)
+              ) < COALESCE((SELECT SUM(capacity) FROM plan_tables
+                WHERE plan_id = ? AND COALESCE(game_tier, 0) =
+                  COALESCE(signup.game_tier, 0)), 0)
+                THEN 'reserved' ELSE 'bench' END,
+              COALESCE((SELECT MAX(roster_rank) FROM assignments
+                WHERE plan_id = ? AND COALESCE(game_tier, 0) =
+                  COALESCE(signup.game_tier, 0)), 0) + 1,
              NULL, ?
            FROM plans plan
            JOIN signups signup
              ON signup.event_id = plan.event_id AND signup.user_id = ?
-           WHERE plan.plan_id = ? AND plan.status = 'published'
-             AND signup.status = 'active' AND signup.signup_kind = 'player'`,
+            WHERE plan.plan_id = ? AND plan.status = 'published'
+              AND signup.status = 'active' AND signup.signup_kind = 'player'`,
         )
         .bind(
           input.assignmentId,
@@ -1949,9 +1992,17 @@ export class GuildRepository {
         ),
       this.db
         .prepare(
-          `UPDATE assignments SET
-             display_name = ?,
-             table_id = CASE WHEN status = 'withdrawn' THEN NULL ELSE table_id END,
+           `UPDATE assignments SET
+              display_name = ?,
+              game_tier = CASE WHEN status = 'withdrawn' THEN (
+                SELECT signup.game_tier
+                FROM plans plan
+                JOIN signups signup
+                  ON signup.event_id = plan.event_id
+                 AND signup.user_id = assignments.user_id
+                WHERE plan.plan_id = assignments.plan_id
+              ) ELSE game_tier END,
+              table_id = CASE WHEN status = 'withdrawn' THEN NULL ELSE table_id END,
              desired_table_id = CASE WHEN status = 'withdrawn' THEN NULL ELSE desired_table_id END,
              status = CASE WHEN status = 'withdrawn' THEN 'unassigned' ELSE status END,
              waitlist_position = CASE WHEN status = 'withdrawn' THEN NULL ELSE waitlist_position END,
@@ -1959,16 +2010,43 @@ export class GuildRepository {
              roster_status = CASE WHEN status = 'withdrawn' THEN
                CASE WHEN (
                  SELECT COUNT(*) FROM assignments reserved
-                 WHERE reserved.plan_id = assignments.plan_id
-                   AND reserved.roster_status = 'reserved'
-                   AND reserved.status <> 'withdrawn'
-               ) < COALESCE((SELECT SUM(capacity) FROM plan_tables
-                 WHERE plan_id = assignments.plan_id), 0)
+                  WHERE reserved.plan_id = assignments.plan_id
+                    AND reserved.roster_status = 'reserved'
+                    AND reserved.status <> 'withdrawn'
+                    AND COALESCE(reserved.game_tier, 0) =
+                        COALESCE((
+                          SELECT signup.game_tier
+                          FROM plans plan
+                          JOIN signups signup
+                            ON signup.event_id = plan.event_id
+                           AND signup.user_id = assignments.user_id
+                          WHERE plan.plan_id = assignments.plan_id
+                        ), 0)
+                ) < COALESCE((SELECT SUM(capacity) FROM plan_tables
+                  WHERE plan_id = assignments.plan_id
+                    AND COALESCE(game_tier, 0) =
+                        COALESCE((
+                          SELECT signup.game_tier
+                          FROM plans plan
+                          JOIN signups signup
+                            ON signup.event_id = plan.event_id
+                           AND signup.user_id = assignments.user_id
+                          WHERE plan.plan_id = assignments.plan_id
+                        ), 0)), 0)
                  THEN 'reserved' ELSE 'bench' END
                ELSE roster_status END,
              roster_rank = CASE WHEN status = 'withdrawn' THEN
-               COALESCE((SELECT MAX(candidate.roster_rank) FROM assignments candidate
-                 WHERE candidate.plan_id = assignments.plan_id), 0) + 1
+                COALESCE((SELECT MAX(candidate.roster_rank) FROM assignments candidate
+                  WHERE candidate.plan_id = assignments.plan_id
+                    AND COALESCE(candidate.game_tier, 0) =
+                        COALESCE((
+                          SELECT signup.game_tier
+                          FROM plans plan
+                          JOIN signups signup
+                            ON signup.event_id = plan.event_id
+                           AND signup.user_id = assignments.user_id
+                          WHERE plan.plan_id = assignments.plan_id
+                        ), 0)), 0) + 1
                ELSE roster_rank END,
              roster_promoted_at = CASE WHEN status = 'withdrawn' THEN NULL ELSE roster_promoted_at END,
              roster_notification_status = CASE WHEN status = 'withdrawn' THEN NULL ELSE roster_notification_status END,
@@ -1987,8 +2065,13 @@ export class GuildRepository {
              JOIN signups signup
                ON signup.event_id = plan.event_id AND signup.user_id = assignments.user_id
              WHERE plan.plan_id = assignments.plan_id AND plan.status = 'published'
-               AND signup.status = 'active' AND signup.signup_kind = 'player'
-           )`,
+                AND signup.status = 'active' AND signup.signup_kind = 'player'
+                AND (
+                  assignments.status = 'withdrawn'
+                  OR COALESCE(signup.game_tier, 0) =
+                     COALESCE(assignments.game_tier, 0)
+                )
+            )`,
         )
         .bind(input.displayName, now, input.planId, input.userId),
       this.db
@@ -2009,14 +2092,18 @@ export class GuildRepository {
     return assignment;
   }
 
-  private async getNextRosterBench(planId: string): Promise<Assignment | null> {
+  private async getNextRosterBench(
+    planId: string,
+    gameTier: GameTier,
+  ): Promise<Assignment | null> {
     const row = await this.db
       .prepare(
         `SELECT * FROM assignments
-         WHERE plan_id = ? AND roster_status = 'bench' AND status <> 'withdrawn'
+         WHERE plan_id = ? AND COALESCE(game_tier, 0) = COALESCE(?, 0)
+           AND roster_status = 'bench' AND status <> 'withdrawn'
          ORDER BY roster_rank ASC, user_id ASC LIMIT 1`,
       )
-      .bind(planId)
+      .bind(planId, gameTier)
       .first<AssignmentRow>();
     return row ? assignmentFromRow(row) : null;
   }
@@ -2027,6 +2114,7 @@ export class GuildRepository {
     enabled: boolean,
     withdrawalUserId: string,
     withdrawalToken: string,
+    gameTier: GameTier,
   ): D1PreparedStatement {
     return this.db
       .prepare(
@@ -2048,14 +2136,16 @@ export class GuildRepository {
              AND withdrawal.withdrawal_token = ?
          ) AND assignment_id = (
            SELECT candidate.assignment_id FROM assignments candidate
-           WHERE candidate.plan_id = ? AND candidate.roster_status = 'bench'
+            WHERE candidate.plan_id = ?
+              AND COALESCE(candidate.game_tier, 0) = COALESCE(?, 0)
+              AND candidate.roster_status = 'bench'
              AND candidate.status <> 'withdrawn'
            ORDER BY candidate.roster_rank ASC, candidate.user_id ASC LIMIT 1
          )`,
       )
       .bind(
         now, now, now, Number(enabled),
-        planId, withdrawalUserId, withdrawalToken, planId,
+         planId, withdrawalUserId, withdrawalToken, planId, gameTier,
       );
   }
 
@@ -2145,8 +2235,12 @@ export class GuildRepository {
               FROM plan_tables t
               JOIN plans p ON p.plan_id = t.plan_id
               JOIN weekly_events weekly ON weekly.event_id = p.event_id
-              WHERE t.table_id = ? AND t.plan_id = ? AND p.status = 'published'
-                AND weekly.status = 'published'
+               WHERE t.table_id = ? AND t.plan_id = ? AND p.status = 'published'
+                 AND weekly.status = 'published'
+                 AND COALESCE(t.game_tier, 0) = COALESCE((
+                   SELECT eligible.game_tier FROM assignments eligible
+                   WHERE eligible.plan_id = ? AND eligible.user_id = ?
+                 ), 0)
                 AND COALESCE(weekly.table_selection_closes_at, weekly.starts_at)
                   > CAST(strftime('%s', 'now') AS INTEGER) * 1000
            ), availability AS (
@@ -2175,7 +2269,8 @@ export class GuildRepository {
              AND EXISTS (SELECT 1 FROM target)`,
         )
         .bind(
-          userId, tableId, planId, tableId, tableId, tableId, planId, tableId,
+          userId, tableId, planId, planId, userId,
+          tableId, tableId, tableId, planId, tableId,
           userId, now, now, planId, userId,
         ),
       this.db
@@ -2275,7 +2370,7 @@ export class GuildRepository {
     const promotionCandidate = await this.getNextWaitlisted(planId, vacatedTableId);
     const shouldPromoteRoster = promoteRoster && before.rosterStatus === "reserved";
     const rosterPromotionCandidate = shouldPromoteRoster
-      ? await this.getNextRosterBench(planId)
+      ? await this.getNextRosterBench(planId, before.gameTier)
       : null;
     const now = this.now();
     const withdrawalToken = crypto.randomUUID();
@@ -2313,6 +2408,7 @@ export class GuildRepository {
         shouldPromoteRoster,
         userId,
         withdrawalToken,
+        before.gameTier,
       ),
     ]);
     const assignment = await this.getAssignment(planId, userId);

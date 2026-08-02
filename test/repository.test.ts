@@ -280,6 +280,7 @@ describe("D1 persistence model", () => {
     const tables = Array.from({ length: 8 }, (_, index) => ({
       tableId: `table-${index + 1}`,
       tableNumber: index + 1,
+      gameTier: 1 as const,
       title: `Table ${index + 1}`,
       capacity: 6,
       gmUserId: `gm-${index + 1}`,
@@ -290,6 +291,7 @@ describe("D1 persistence model", () => {
       tableId: `table-${Math.floor(index / 6) + 1}`,
       userId: `player-${index + 1}`,
       displayName: `Player ${index + 1}`,
+      gameTier: 1 as const,
       status: "assigned" as const,
       waitlistPosition: null,
     }));

@@ -288,8 +288,19 @@ export const commands = [
             required: true,
             choices: [
               { name: "GM", value: "gm" },
+              { name: "Backup GM", value: "backup" },
               { name: "Player", value: "player" },
               { name: "Withdraw", value: "withdraw" },
+            ],
+          },
+          {
+            type: 4,
+            name: "tier",
+            description: "Required for a GM or player; omitted for backup or withdrawal.",
+            choices: [
+              { name: "Tier 1 — Levels 3–4", value: 1 },
+              { name: "Tier 2 — Levels 5–7", value: 2 },
+              { name: "Tier 3 — Levels 8+", value: 3 },
             ],
           },
         ],

@@ -107,8 +107,8 @@ than expected before `/week open`, generate fresh values.
 
       `/week open starts_at:<first-helper-value> title:Pilot source event`
 
-- [ ] Member A clicks **Run a Game**. Members B and C click **Play**. Have Member
-      C withdraw and click **Play** again; have Member A repeat **Run a Game**.
+- [ ] Member A clicks **Run T1**. Members B and C click **Play T1**. Have Member
+      C withdraw and click **Play T1** again; have Member A repeat **Run T1**.
       Run `/week status` and verify one GM and two players, with no duplicates.
 - [ ] Run these commands in order:
 
@@ -163,7 +163,7 @@ than expected before `/week open`, generate fresh values.
 
 - [ ] Generate a fresh start time and run
       `/week open starts_at:<first-helper-value> title:Pilot target A`.
-- [ ] Member C clicks **Run a Game**. Members A and B click **Play**. Run
+- [ ] Member C clicks **Run T1**. Members A and B click **Play T1**. Run
       `/week lock`, `/week plan`, and `/week publish` in that order. Confirm one
       table with Member C as GM and capacity 1.
 - [ ] Member B selects table 1 first. Member A selects it second and becomes
@@ -191,7 +191,7 @@ than expected before `/week open`, generate fresh values.
 
 - [ ] Generate a fresh start time and run
       `/week open starts_at:<first-helper-value> title:Pilot target B`.
-- [ ] Member C clicks **Run a Game**. Members A and B click **Play**. Run
+- [ ] Member C clicks **Run T1**. Members A and B click **Play T1**. Run
       `/week lock`, `/week plan`, and `/week publish` in that order.
 - [ ] Member A selects table 1, runs `/priority use table_number:1`, and confirms
       the bound button. Run `/priority-admin diagnose member:@MemberA` and record
@@ -218,7 +218,7 @@ than expected before `/week open`, generate fresh values.
 - [ ] Confirm no event is active. Choose one local weekday and five future times
       on that day, each at least one 15-minute Cron interval apart, in this
       order: GM signup, player signup, tables, open seating, game. Leave at
-      least 45 minutes between tables and open seating so the global-waitlist
+      least 45 minutes between tables and open seating so the per-tier waitlist
       checks below can be completed. Keep the game two to three hours away.
       Save the accelerated sequence:
 
@@ -242,8 +242,8 @@ than expected before `/week open`, generate fresh values.
       `/guild automation mode:Review before publish confirm:True role_sync:False`
 
 - [ ] Allow up to two Cron intervals (30 minutes) for the scheduled event to be
-      created and opened. Members A and B click **Play** and Member C clicks
-      **Run a Game** as soon as the signup message appears.
+      created and opened. Members A and B click **Play T1** and Member C clicks
+      **Run T1** as soon as the signup message appears.
 - [ ] After the configured `tables_time`, allow up to one more Cron interval.
       Run `/week status`. Verify the phase is planned, recent operations show
       `lock-plan`, and no table publication exists. This is Review's approval
@@ -252,13 +252,13 @@ than expected before `/week open`, generate fresh values.
       only after completing these player-capacity checks:
 
       1. The draft identifies one player as reserved and the later signup on the
-         global waitlist. The reserved player chooses the table successfully.
-      2. Before `open_seating_time`, the global-waitlist player tries **Join** and
+         Tier 1 weekly waitlist. The reserved player chooses the table successfully.
+      2. Before `open_seating_time`, the Tier 1 waitlisted player tries **Join** and
          receives a private explanation that signup-order capacity is still
          reserved. The table must not change.
       3. The reserved player presses **Withdraw** on the weekly signup card. This
          is a drop from the week, not merely **Leave Table**.
-      4. Verify the first global-waitlist player receives one private promotion
+      4. Verify the first Tier 1 waitlisted player receives one private promotion
          message, may now choose the table, and no duplicate DM arrives after an
          additional Cron interval.
       5. Have that promoted player use **Leave Table**. Verify their weekly
@@ -278,8 +278,8 @@ than expected before `/week open`, generate fresh values.
 
 - [ ] Allow up to two Cron intervals for the event to be created/opened. Run
       `/week status` and verify the recent operation record. This is the required
-      scheduled Autopilot open transition. Members A and B immediately click
-      **Play** and Member C clicks **Run a Game**.
+       scheduled Autopilot open transition. Members A and B immediately click
+       **Play T1** and Member C clicks **Run T1**.
 - [ ] Immediately run `/guild automation mode:Paused confirm:True`. Wait until
       the one-hour lock deadline has passed plus one Cron interval; `/week status`
       must still show the open phase.

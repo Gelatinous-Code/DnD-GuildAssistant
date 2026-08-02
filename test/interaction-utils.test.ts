@@ -61,6 +61,17 @@ describe("interaction utilities", () => {
       eventId: "event-id",
       action: "gm",
     });
+    expect(parseComponentId("guild:signup:player:2:event-id")).toEqual({
+      kind: "signup",
+      eventId: "event-id",
+      action: "player",
+      gameTier: 2,
+    });
+    expect(parseComponentId("guild:signup:backup:event-id")).toEqual({
+      kind: "signup",
+      eventId: "event-id",
+      action: "backup",
+    });
     expect(parseComponentId("guild:table:join:plan-id:table-id")).toEqual({
       kind: "table",
       planId: "plan-id",
@@ -84,5 +95,6 @@ describe("interaction utilities", () => {
     });
     expect(parseComponentId("guild:priority:confirm:plan-id:table-id")).toBeUndefined();
     expect(parseComponentId("guild:signup:gm:event-id:extra")).toBeUndefined();
+    expect(parseComponentId("guild:signup:player:4:event-id")).toBeUndefined();
   });
 });

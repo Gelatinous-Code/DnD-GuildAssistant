@@ -16,6 +16,11 @@ The project follows [Semantic Versioning](https://semver.org/). Dates use the
 - One-command Second Dawn guild setup that discovers existing GM/player signup
   channels and permanent audience roles, with staged audience-specific cards
   and no broad mentions.
+- Weekly Tier 1 (levels 3–4), Tier 2 (levels 5–7), and Tier 3 (levels 8+)
+  snapshots for GM and player signups, plus backup-GM availability that does not
+  add planned table capacity.
+- Per-tier planning, reservations, waitlists, promotions, table selection,
+  priority seating, published cards, and versioned CSV export fields.
 - Initial Cloudflare Worker Discord interaction endpoint.
 - Signed request verification, endpoint PING/PONG handling, and ping command.
 - Tests, type checking, and repository community health files.
