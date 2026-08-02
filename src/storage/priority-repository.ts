@@ -320,6 +320,8 @@ function sameGrantRequest(grant: DmPriorityGrant, input: GrantCompletedSessionRe
     grant.dmUserId === input.dmUserId &&
     grant.policyVersion === input.policyVersion &&
     grant.earnedTimeZone === input.earnedTimeZone &&
+    grant.earnedAt === input.earnedAt &&
+    grant.expiresAt === input.expiresAt &&
     grant.grantedByUserId === input.grantedByUserId &&
     grant.idempotencyKey === input.idempotencyKey
   );
@@ -348,6 +350,22 @@ export class PriorityRepository {
         "SELECT * FROM dm_priority_grants WHERE guild_id = ? AND completion_revision_id = ?",
       )
       .bind(guildId, completionRevisionId)
+      .first<GrantRow>();
+    return row ? grantFromRow(row) : null;
+  }
+
+  async getActiveGrantForSourceTable(
+    guildId: string,
+    sourceEventId: string,
+    sourceTableId: string,
+  ): Promise<DmPriorityGrant | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT * FROM dm_priority_grants
+         WHERE guild_id = ? AND source_event_id = ? AND source_table_id = ?
+           AND status = 'active'`,
+      )
+      .bind(guildId, sourceEventId, sourceTableId)
       .first<GrantRow>();
     return row ? grantFromRow(row) : null;
   }

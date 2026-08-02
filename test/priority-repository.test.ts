@@ -167,6 +167,18 @@ describe("DM priority D1 migration", () => {
 });
 
 describe("PriorityRepository", () => {
+  it("finds an active grant by tenant-scoped source table", async () => {
+    const fake = new FakeDatabase();
+    fake.firstResults.push(grantRow());
+    const repository = new PriorityRepository(fake as unknown as D1Database);
+
+    await expect(
+      repository.getActiveGrantForSourceTable("guild-1", "event-1", "table-1"),
+    ).resolves.toMatchObject({ grantId: "grant-1", status: "active" });
+    expect(fake.statements[0]?.values).toEqual(["guild-1", "event-1", "table-1"]);
+    expect(fake.statements[0]?.sql).toContain("status = 'active'");
+  });
+
   it("atomically creates one grant, two credits, and two grant events", async () => {
     const fake = new FakeDatabase();
     fake.batchResults.push([

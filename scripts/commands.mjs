@@ -1,3 +1,5 @@
+import { m6Commands } from "./m6-commands.mjs";
+
 // MVP destinations are normal text and announcement channels. Threads and
 // forum/media parents require additional lifecycle and permission semantics.
 const channelTypes = [0, 5];
@@ -444,4 +446,5 @@ export const commands = [
       },
     ],
   },
+  ...m6Commands,
 ];

@@ -176,6 +176,54 @@ describe("DiscordRestClient", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE_URL}/channels/200`);
   });
 
+  it("opens a DM and enforces a stable nonce with no allowed mentions", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: "700", type: 1 }))
+      .mockResolvedValueOnce(
+        jsonResponse({ id: "900", channel_id: "700", content: "private" }),
+      );
+
+    const message = await client.sendDirectMessage(
+      "20",
+      {
+        content: "@everyone private <@20>",
+        allowed_mentions: {
+          parse: ["everyone", "users"],
+          roles: ["30"],
+          users: ["20"],
+          replied_user: true,
+        } as never,
+      },
+      "priority-notification:one",
+    );
+
+    expect(message.id).toBe("900");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [openUrl, openInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(openUrl).toBe(`${API_BASE_URL}/users/@me/channels`);
+    expect(openInit.method).toBe("POST");
+    expect(JSON.parse(String(openInit.body))).toEqual({ recipient_id: "20" });
+
+    const [sendUrl, sendInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(sendUrl).toBe(`${API_BASE_URL}/channels/700/messages`);
+    expect(sendInit.method).toBe("POST");
+    expect(JSON.parse(String(sendInit.body))).toMatchObject({
+      nonce: discordNonce("priority-notification:one"),
+      enforce_nonce: true,
+      allowed_mentions: safeAllowedMentions(),
+    });
+  });
+
+  it("rejects invalid DM recipients and empty delivery keys before fetching", async () => {
+    await expect(
+      client.sendDirectMessage("not-a-snowflake", { content: "private" }, "delivery"),
+    ).rejects.toThrow("Discord snowflake");
+    await expect(
+      client.sendDirectMessage("20", { content: "private" }, "   "),
+    ).rejects.toThrow("deliveryKey is required");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("updates deferred interaction responses without exposing the interaction token", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ id: "900", channel_id: "200", content: "done" }),
@@ -653,6 +701,11 @@ describe("Discord message rendering", () => {
       expect.objectContaining({
         label: "Join Waitlist",
         custom_id: "guild:table:join:plan-1:table-1",
+        disabled: false,
+      }),
+      expect.objectContaining({
+        label: "Use DM Priority",
+        custom_id: "guild:priority:preview:plan-1:table-1",
         disabled: false,
       }),
       expect.objectContaining({

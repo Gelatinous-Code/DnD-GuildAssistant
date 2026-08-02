@@ -67,6 +67,22 @@ describe("interaction utilities", () => {
       tableId: "table-id",
       action: "join",
     });
+    expect(
+      parseComponentId("guild:priority:preview:plan-id:table-id"),
+    ).toEqual({
+      kind: "priority",
+      planId: "plan-id",
+      tableId: "table-id",
+      action: "preview",
+    });
+    expect(
+      parseComponentId("guild:priority:confirm:preview-id"),
+    ).toEqual({
+      kind: "priority",
+      previewId: "preview-id",
+      action: "confirm",
+    });
+    expect(parseComponentId("guild:priority:confirm:plan-id:table-id")).toBeUndefined();
     expect(parseComponentId("guild:signup:gm:event-id:extra")).toBeUndefined();
   });
 });

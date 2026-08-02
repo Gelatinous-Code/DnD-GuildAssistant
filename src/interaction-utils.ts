@@ -119,7 +119,14 @@ export class UserFacingError extends Error {
 
 export type GuildComponent =
   | { kind: "signup"; action: "gm" | "player" | "withdraw"; eventId: string }
-  | { kind: "table"; action: "join" | "leave"; planId: string; tableId: string };
+  | { kind: "table"; action: "join" | "leave"; planId: string; tableId: string }
+  | {
+      kind: "priority";
+      action: "preview";
+      planId: string;
+      tableId: string;
+    }
+  | { kind: "priority"; action: "confirm"; previewId: string };
 
 export function parseComponentId(customId: string | undefined): GuildComponent | undefined {
   if (!customId) return undefined;
@@ -147,6 +154,30 @@ export function parseComponentId(customId: string | undefined): GuildComponent |
       planId: parts[3],
       tableId: parts[4],
     };
+  }
+  if (
+    parts.length === 5 &&
+    parts[0] === "guild" &&
+    parts[1] === "priority" &&
+    parts[2] === "preview" &&
+    parts[3] &&
+    parts[4]
+  ) {
+    return {
+      kind: "priority",
+      action: "preview",
+      planId: parts[3],
+      tableId: parts[4],
+    };
+  }
+  if (
+    parts.length === 4 &&
+    parts[0] === "guild" &&
+    parts[1] === "priority" &&
+    parts[2] === "confirm" &&
+    parts[3]
+  ) {
+    return { kind: "priority", action: "confirm", previewId: parts[3] };
   }
   return undefined;
 }

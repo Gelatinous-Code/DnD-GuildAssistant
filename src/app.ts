@@ -24,6 +24,14 @@ import {
   UserFacingError,
 } from "./interaction-utils";
 import {
+  cancelPriorityForEvent,
+  reconcilePriorityAfterPublish,
+  handleM6Command,
+  handleM6Component,
+  runM6Scheduled,
+  settlePriorityForEvent,
+} from "./m6-app";
+import {
   diagnoseChannelPermissions,
   diagnoseInteractionPermissions,
   effectiveChannelPermissions,
@@ -808,6 +816,9 @@ async function handleWeekCommand(
             false,
             result.event.eventId,
           );
+          await reconcilePriorityAfterPublish(
+            env, result.event.eventId, published.bundle.plan.planId,
+          );
           correctionWarning = undefined;
           automationText =
             "\n✅ Autopilot rebuilt and published revision " +
@@ -865,6 +876,9 @@ async function handleWeekCommand(
   }
   if (invocation.subcommand === "publish") {
     const result = await week.publishPlan(guildId, actorUserId);
+    await reconcilePriorityAfterPublish(
+      env, result.event.eventId, result.bundle.plan.planId,
+    );
     let roleText = "";
     const config = await repository.getGuildConfig(guildId);
     if (config?.roleSyncEnabled) {
@@ -937,6 +951,8 @@ async function handleWeekCommand(
     }
   }
   if (invocation.subcommand === "archive") {
+    const current = await repository.getCurrentWeeklyEvent(guildId);
+    if (current) await settlePriorityForEvent(env, current);
     await week.archiveWeek(guildId, actorUserId);
     let roleText = "⚠️ GM role sync is paused; no Discord roles were changed.";
     try {
@@ -948,8 +964,15 @@ async function handleWeekCommand(
   }
   if (invocation.subcommand === "cancel") {
     const reason = stringOption(invocation, "reason") ?? "";
-    const event = await week.cancelWeek(guildId, actorUserId, reason);
+    if (reason.replace(/[\r\n]+/g, " ").trim().length < 3) {
+      throw new UserFacingError("reason must contain at least 3 characters.");
+    }
+    const current = await repository.getCurrentWeeklyEvent(guildId);
+    if (!current) throw new UserFacingError("There is no active week to cancel.");
+    await cancelPriorityForEvent(
+      env, current, actorUserId ?? interaction.id ?? "discord-interaction", reason);
     let roleText = "⚠️ GM role sync is paused; no Discord roles were changed.";
+    const event = await week.cancelWeek(guildId, actorUserId, reason);
     try {
       roleText = formatRoleReport(await roles.sync(guildId));
     } catch (error) {
@@ -970,7 +993,10 @@ async function handleWeekCommand(
         "publish",
         actorUserId,
         async () => {
-          await week.publishPlan(guildId, actorUserId, true, event.eventId);
+          const published = await week.publishPlan(guildId, actorUserId, true, event.eventId);
+          await reconcilePriorityAfterPublish(
+            env, event.eventId, published.bundle.plan.planId,
+          );
         },
       );
       return ephemeral("✅ Table publication step is " + outcome + ".");
@@ -1051,6 +1077,7 @@ async function handleWeekCommand(
         "finalize",
         actorUserId,
         async () => {
+          await settlePriorityForEvent(env, event);
           await week.finalizeTables(guildId, event.eventId);
         },
         event.eventId + ":" + plan.planId + ":" + event.tableStateVersion,
@@ -1299,14 +1326,7 @@ async function handleComponent(
     return ephemeral("✅ " + result.message);
   }
 
-  const result = await week.selectTable({
-    guildId,
-    planId: component.planId,
-    tableId: component.tableId,
-    userId,
-    action: component.action,
-  });
-  return ephemeral("✅ " + result.message);
+  return handleM6Component(interaction, env, component);
 }
 
 async function executeDiscordInteraction(
@@ -1330,6 +1350,8 @@ async function executeDiscordInteraction(
     if (command === "week") return handleWeekCommand(interaction, env);
     if (command === "roles") return handleRolesCommand(interaction, env);
     if (command === "reminder") return handleReminderCommand(interaction, env);
+    const m6Response = await handleM6Command(interaction, env);
+    if (m6Response !== null) return m6Response;
     return ephemeral("I don't recognize that command yet.");
   } catch (error) {
     if (error instanceof UserFacingError || error instanceof ReminderConfigurationError) {
@@ -1459,15 +1481,22 @@ export async function handleScheduled(env: Env, now = Date.now()): Promise<void>
         await week.generatePlan(event.guildId, undefined, event.eventId);
       },
       publishEvent: async (event) => {
-        await week.publishPlan(event.guildId, undefined, true, event.eventId);
+        const published = await week.publishPlan(
+          event.guildId, undefined, true, event.eventId,
+        );
+        await reconcilePriorityAfterPublish(
+          env, event.eventId, published.bundle.plan.planId,
+        );
       },
       syncRoles: async (event) => {
         requireSuccessfulRoleReconciliation(await roles.sync(event.guildId));
       },
       finalizeEvent: async (event) => {
+        await settlePriorityForEvent(env, event);
         await week.finalizeTables(event.guildId, event.eventId);
       },
       archiveEvent: async (event) => {
+        await settlePriorityForEvent(env, event);
         await week.archiveWeek(event.guildId, undefined, event.eventId);
         const config = await repository.getGuildConfig(event.guildId);
         if (config?.roleSyncEnabled) {
@@ -1483,4 +1512,5 @@ export async function handleScheduled(env: Env, now = Date.now()): Promise<void>
     },
     now,
   );
+  await runM6Scheduled(env, now);
 }
