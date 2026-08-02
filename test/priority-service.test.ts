@@ -97,6 +97,7 @@ describe("PriorityService", () => {
       dmUserId: "dm-1",
       grantedByUserId: "admin-1",
       earnedTimeZone: "America/Denver",
+      earnedAt,
       idempotencyKey: "grant:completion-rev-1",
     });
 

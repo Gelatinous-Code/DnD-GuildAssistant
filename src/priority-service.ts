@@ -37,6 +37,8 @@ export interface GrantDmSessionRewardInput {
   dmUserId: string;
   grantedByUserId: string;
   earnedTimeZone: string;
+  /** Persisted organizer-confirmation timestamp; retries must reuse it. */
+  earnedAt: number;
   idempotencyKey: string;
 }
 
@@ -106,7 +108,10 @@ export class PriorityService {
       throw new Error("The persistence contract requires exactly two DM priority credits");
     }
 
-    const earnedAt = this.now();
+    const earnedAt = input.earnedAt;
+    if (!Number.isSafeInteger(earnedAt) || earnedAt < 0) {
+      throw new RangeError("earnedAt must be a non-negative safe-integer timestamp");
+    }
     const expiration = calculateDmPriorityExpiration(earnedAt, input.earnedTimeZone);
     return this.repository.grantCompletedSessionReward({
       grantId: this.id(),

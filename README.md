@@ -39,6 +39,16 @@ The native weekly workflow is implemented end to end:
 - Player table choice/change/leave, atomic capacity enforcement, table-specific
   waitlists, and deterministic promotion. Selection closes at game time and the
   bot posts a final Discord manifest for the session.
+- Organizer-confirmed actual session attendance, including cancellation,
+  no-show, substitute, walk-in, and append-only correction outcomes. One
+  eligible completed DM session awards exactly two idempotent DM priority
+  tokens; publishing or archiving alone awards nothing.
+- Explicit private priority preview/confirmation, deterministic full-table
+  displacement and promotion, close-time redemption/release, cancellation
+  refunds, expiration, compatible-plan carry-forward, and sanitized admin
+  diagnostics.
+- Durable private lifecycle DMs with configurable pre-expiration reminders,
+  blocked-DM handling, and conservative ambiguous-delivery quarantine.
 - Audited late admin corrections that regenerate the plan and carry forward
   valid player table choices when the table and its capacity still allow them.
 - Bot-owned weekly GM role leases that preserve every manually assigned role.
@@ -86,9 +96,14 @@ Admin commands require Manage Server and return private responses.
 | <code>/roles sync</code> | Preview or apply weekly GM role reconciliation. |
 | <code>/reminder configure</code> | Preview and enable/disable the pre-lock reminder. |
 | <code>/reminder send</code> | Send once now or explicitly request an intentional resend. |
+| <code>/session status</code> / <code>attendance</code> / <code>confirm</code> | Privately record actual archived-table outcomes and reconcile the DM reward. |
+| <code>/priority status</code> / <code>use</code> / <code>release</code> | Privately view, explicitly confirm, or release a member's DM priority token. |
+| <code>/priority-admin diagnose</code> | Return an aliased, sanitized reward/seating/notification trace. |
+| <code>/priority-admin correct</code> / <code>refund</code> | Append an authorized, reasoned reward correction or exceptional token refund. |
+| <code>/priority-admin configure</code> | Configure or disable the private pre-expiration reminder. |
 
-Members use buttons on the signup and published table messages; they do not need
-admin commands.
+Members use signup/table buttons plus the private `/priority` command; they do
+not need admin permissions.
 
 ## Discord permissions
 
@@ -216,6 +231,9 @@ retention, credential rotation, and maintainer handoff. The existing
 [GM priority policy](docs/gm-priority-policy.md) documents deterministic GM
 selection, while the [DM priority token policy](docs/dm-priority-token-policy.md)
 defines completed-session rewards and priority player seats.
+
+Use the [DM priority operations runbook](docs/dm-priority-operations.md) for
+attendance confirmation, disputes, lifecycle delivery, and go-live recovery.
 
 ## Contributing and security
 

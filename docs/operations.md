@@ -69,11 +69,20 @@ Discord supplies the option form after a subcommand is selected.
 | `/roles sync` | Preview with `dry_run: true`; apply the same desired-vs-leased reconciliation with `dry_run: false`. |
 | `/reminder configure` | Validate and show an ephemeral preview of channel, schedule, roles, and rendered text. Set `enabled: false` to disable/skip future occurrences. |
 | `/reminder send` | Send an authorized reminder now. Intentional resend requires the explicit resend/confirmation option. |
+| `/session status`, `attendance`, `confirm` | Privately review actual attendance, record deviations, and confirm/correct an archived table outcome. |
+| `/priority status`, `use`, `release` | Privately inspect, explicitly reserve, or release the invoking member's token. |
+| `/priority-admin diagnose` | Return an aliased tenant-scoped completion, token, seating, and notification trace. |
+| `/priority-admin correct`, `refund` | Append a confirmed, reasoned grant correction or exceptional token refund. |
+| `/priority-admin configure` | Set this guild's pre-expiration DM lead; `0` disables it. |
 
 Configure is the reminder preview. `/week skip` skips one persisted occurrence;
 `enabled: false` pauses creation of future reminder occurrences. An ordinary
 retry is not an intentional resend and must not create a second successful
 message.
+
+The [DM priority operations runbook](dm-priority-operations.md) is the
+authoritative organizer path for post-game confirmation, displacement disputes,
+blocked/uncertain DMs, correction, and the required live test-guild pilot.
 
 ## First-time activation
 
@@ -223,6 +232,8 @@ The operational policy is:
 | Signups, plans, assignments, and GM selection history | 13 months | One rolling year of weekly recovery and explainable GM rotation |
 | Audit metadata and published revision identifiers | 13 months | Resolve disputes and retries without retaining message bodies |
 | Reminder delivery content and failure text | 30 days | Short-term retry/incident diagnosis |
+| Session attendance/completion, reward grants, credits, and seating decisions | 13 months | Resolve reward and displacement disputes without rewriting history |
+| DM priority outbox content and sanitized failure state | 30 days | Short-term delivery recovery; token state does not depend on message retention |
 | Completed operation request/result payloads | 90 days | Idempotency and operational recovery |
 | Released role leases | 90 days | Prove role ownership during repair |
 | Cloudflare logs | Shortest practical operator setting, at most 30 days for MVP | Diagnose service failures; never intentionally log secrets or full member content |

@@ -428,6 +428,33 @@ export class DiscordRestClient {
     return this.#request("GET", `/channels/${channelId}`);
   }
 
+  createDmChannel(userId: Snowflake): Promise<DiscordChannel> {
+    requireSnowflake(userId, "userId");
+    return this.#request("POST", "/users/@me/channels", {
+      recipient_id: userId,
+    });
+  }
+
+  /**
+   * Convenience wrapper for private delivery outside the durable outbox. The
+   * delivery key is converted to a stable Discord nonce and enforced so an
+   * idempotent retry resolves to the original message instead of duplicating it.
+   */
+  async sendDirectMessage(
+    userId: Snowflake,
+    payload: DiscordMessagePayload,
+    deliveryKey: string,
+  ): Promise<DiscordMessage> {
+    if (!deliveryKey.trim()) throw new TypeError("deliveryKey is required");
+    const channel = await this.createDmChannel(userId);
+    return this.sendChannelMessage(channel.id, {
+      ...payload,
+      allowed_mentions: safeAllowedMentions(),
+      nonce: discordNonce(deliveryKey),
+      enforce_nonce: true,
+    });
+  }
+
   editOriginalInteractionResponse(
     applicationId: Snowflake,
     interactionToken: string,
@@ -591,6 +618,12 @@ export type TableAction = "join" | "leave";
 
 export function tableCustomId(planId: string, tableId: string, action: TableAction): string {
   return componentId(["guild", "table", action, planId, tableId]);
+}
+
+export function priorityPreviewCustomId(
+  planId: string, tableId: string,
+): string {
+  return componentId(["guild", "priority", "preview", planId, tableId]);
 }
 
 export interface SignupMessageInput {
@@ -913,6 +946,13 @@ export function renderPublishedTable(input: PublishedTableInput): DiscordMessage
             style: ButtonStyle.Success,
             custom_id: tableCustomId(input.planId, input.id, "join"),
             label: full ? "Join Waitlist" : "Join Table",
+            disabled: Boolean(input.closed),
+          },
+          {
+            type: ComponentType.Button,
+            style: ButtonStyle.Primary,
+            custom_id: priorityPreviewCustomId(input.planId, input.id),
+            label: "Use DM Priority",
             disabled: Boolean(input.closed),
           },
           {
