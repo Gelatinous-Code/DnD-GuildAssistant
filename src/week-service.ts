@@ -1,6 +1,7 @@
 import {
   DiscordRestClient,
   discordNonce,
+  renderFinalManifest,
   renderPlanPreview,
   renderPublishedTable,
   renderSignupMessage,
@@ -16,10 +17,12 @@ import {
 import { nextWeeklyOccurrence } from "./schedule";
 import {
   GuildRepository,
+  TableSelectionUnavailableError,
   type Assignment,
   type GuildConfig,
   type PlanBundle,
   type PlanTable,
+  type SaveDraftPlanInput,
   type Signup,
   type SignupKind,
   type WeeklyEvent,
@@ -27,6 +30,16 @@ import {
 import { UserFacingError } from "./interaction-utils";
 
 const ALGORITHM_VERSION = "balanced-rotation-v1";
+const WEEKDAY_NAMES = [
+  "",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+] as const;
 
 export interface WeekServiceOptions {
   now?: () => number;
@@ -130,16 +143,26 @@ export class WeekService {
     const lines = [
       "## Guild Assistant status",
       "**Channel:** " + (config.eventChannelId ? "<#" + config.eventChannelId + ">" : "missing"),
-      "**Weekly GM role:** " + (config.gmRoleId ? "<@&" + config.gmRoleId + ">" : "missing"),
+      "**Weekly GM role:** " +
+        (config.gmRoleId ? "<@&" + config.gmRoleId + ">" : "optional; not configured"),
       "**Reminder role:** " +
         (config.reminderRoleId ? "<@&" + config.reminderRoleId + ">" : "not configured"),
-      "**Schedule:** ISO weekday " +
-        config.weeklyDay +
+      "**Schedule:** " +
+        (WEEKDAY_NAMES[config.weeklyDay] ?? "weekday " + config.weeklyDay) +
         " at " +
         config.weeklyTime +
         " (" +
         config.timezone +
         ")",
+      "**Signup timing:** opens " +
+        config.signupOpenLeadDays +
+        " day" +
+        (config.signupOpenLeadDays === 1 ? "" : "s") +
+        " before; locks " +
+        config.signupLockLeadHours +
+        " hour" +
+        (config.signupLockLeadHours === 1 ? "" : "s") +
+        " before",
       "**Tables:** " +
         config.tableMinSize +
         " minimum / " +
@@ -149,6 +172,8 @@ export class WeekService {
         " maximum",
       "**Automation:** scheduling " +
         (config.schedulingEnabled ? "on" : "off") +
+        ", auto-publish " +
+        (config.autoPublishEnabled ? "on" : "off") +
         ", role sync " +
         (config.roleSyncEnabled ? "on" : "off"),
     ];
@@ -169,6 +194,7 @@ export class WeekService {
       : null;
     lines.push(
       "**Current week:** " + safeInline(event.title) + " — " + unix(event.startsAt),
+      "**Event ID:** " + safeInline(event.eventId, 180),
       "**Phase:** " + event.status,
       "**Signups:** " + counts.gms + " GMs / " + counts.players + " players",
       "**Plan:** " +
@@ -177,6 +203,20 @@ export class WeekService {
             " (" + currentPlan.selectedGmCount + " tables)"
           : "not generated"),
     );
+    if (currentPlan?.status === "published") {
+      const manifestCurrent =
+        Boolean(event.finalManifestChannelId && event.finalManifestMessageId) &&
+        event.finalizedPlanId === currentPlan.planId &&
+        event.finalizedTableStateVersion === event.tableStateVersion;
+      lines.push(
+        "**Final roster:** " +
+          (manifestCurrent
+            ? "current (state " + event.tableStateVersion + ")"
+            : this.now() < event.tableSelectionClosesAt
+              ? "scheduled after table selection closes " + unix(event.tableSelectionClosesAt)
+              : "awaiting regeneration for state " + event.tableStateVersion),
+      );
+    }
     if (bundle?.tables.some((table) => table.channelId && table.messageId)) {
       lines.push(
         "**Published table messages:**",
@@ -289,6 +329,7 @@ export class WeekService {
       endsAt: startsAt + config.eventDurationMinutes * 60_000,
       signupOpensAt: startsAt - config.signupOpenLeadDays * 86_400_000,
       signupLocksAt: startsAt - config.signupLockLeadHours * 3_600_000,
+      tableSelectionClosesAt: startsAt,
       status: "open",
       source: "native",
       createdByUserId: input.actorUserId,
@@ -467,21 +508,24 @@ export class WeekService {
     userId: string;
     displayName: string;
     action: SignupKind | "withdraw";
-  }): Promise<{ event: WeeklyEvent; warning?: string }> {
+  }): Promise<{ event: WeeklyEvent; warning?: string; requiresReplan: boolean }> {
     const event = await this.repository.getCurrentWeeklyEvent(input.guildId);
     if (!event) throw new UserFacingError("There is no active week to correct.");
     if (event.status === "archived" || event.status === "cancelled") {
       throw new UserFacingError("Archived or cancelled weeks cannot be corrected.");
     }
+    const previousSignup = await this.repository.getSignup(event.eventId, input.userId);
+    const plan = ["planned", "published"].includes(event.status)
+      ? await this.repository.getCurrentPlan(event.eventId)
+      : null;
+    const affectsGm =
+      input.action === "gm" || previousSignup?.signupKind === "gm";
+    let assignmentMayHaveChanged = false;
     if (input.action === "withdraw") {
       await this.repository.withdrawSignup(event.eventId, input.userId);
-      const plan = await this.repository.getCurrentPlan(event.eventId);
       if (plan) {
         await this.repository.withdrawAssignmentAndPromote(plan.planId, input.userId);
-        const bundle = await this.repository.getPlanBundle(plan.planId);
-        if (bundle && plan.status === "published") {
-          await this.refreshPublishedTables(event, bundle);
-        }
+        assignmentMayHaveChanged = true;
       }
     } else {
       await this.repository.saveSignup({
@@ -491,6 +535,23 @@ export class WeekService {
         signupKind: input.action,
         source: "admin",
       });
+      if (plan?.status === "published" && input.action === "player") {
+        await this.repository.ensureUnassignedAssignment({
+          assignmentId: this.id(),
+          planId: plan.planId,
+          userId: input.userId,
+          displayName: input.displayName,
+        });
+      } else if (plan?.status === "published" && input.action === "gm") {
+        // A seated player who becomes a GM must immediately release their seat;
+        // the normal promotion path keeps the visible published plan consistent.
+        await this.repository.withdrawAssignmentAndPromote(plan.planId, input.userId);
+        assignmentMayHaveChanged = true;
+      }
+    }
+    if (plan?.status === "published" && assignmentMayHaveChanged) {
+      const bundle = await this.repository.getPlanBundle(plan.planId);
+      if (bundle) await this.refreshPublishedTables(event, bundle);
     }
     const latest = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
     if (latest.signupChannelId && latest.signupMessageId) {
@@ -509,12 +570,106 @@ export class WeekService {
       entityId: input.userId,
       details: { action: input.action },
     });
+    const requiresReplan =
+      ["planned", "published"].includes(event.status) && affectsGm;
     return {
       event: latest,
-      warning: ["planned", "published"].includes(event.status)
+      requiresReplan,
+      warning: requiresReplan
         ? "The plan predates this correction. Run /week plan, review the new revision, and publish it."
         : undefined,
     };
+  }
+
+  private carryForwardAssignments(
+    players: readonly Signup[],
+    tables: ReadonlyArray<SaveDraftPlanInput["tables"][number]>,
+    previous: PlanBundle | null,
+  ): SaveDraftPlanInput["assignments"] {
+    const next = new Map<string, SaveDraftPlanInput["assignments"][number]>(
+      players.map((player) => [
+        player.userId,
+        {
+          assignmentId: this.id(),
+          tableId: null,
+          userId: player.userId,
+          displayName: player.displayName || player.userId,
+          status: "unassigned" as const,
+          waitlistPosition: null,
+        },
+      ]),
+    );
+    if (!previous) return players.map((player) => next.get(player.userId)!);
+
+    const playerById = new Map(players.map((player) => [player.userId, player]));
+    const previousTableById = new Map(
+      previous.tables.map((table) => [table.tableId, table]),
+    );
+    const nextTableByGm = new Map(tables.map((table) => [table.gmUserId, table]));
+    const compatible = new Map<string, Assignment[]>();
+
+    for (const assignment of previous.assignments) {
+      if (!playerById.has(assignment.userId)) continue;
+      if (assignment.status !== "assigned" && assignment.status !== "waitlisted") continue;
+      const desiredTableId = assignment.desiredTableId ?? assignment.tableId;
+      const previousTable = desiredTableId
+        ? previousTableById.get(desiredTableId)
+        : undefined;
+      const nextTable = previousTable
+        ? nextTableByGm.get(previousTable.gmUserId)
+        : undefined;
+      if (!nextTable) continue;
+      const candidates = compatible.get(nextTable.tableId) ?? [];
+      candidates.push(assignment);
+      compatible.set(nextTable.tableId, candidates);
+    }
+
+    for (const table of tables) {
+      const candidates = (compatible.get(table.tableId) ?? []).sort((left, right) => {
+        const status =
+          Number(left.status === "waitlisted") - Number(right.status === "waitlisted");
+        if (status !== 0) return status;
+        if (left.status === "waitlisted" && right.status === "waitlisted") {
+          const position =
+            (left.waitlistPosition ?? Number.MAX_SAFE_INTEGER) -
+            (right.waitlistPosition ?? Number.MAX_SAFE_INTEGER);
+          if (position !== 0) return position;
+        }
+        const time =
+          (left.assignedAt ?? left.updatedAt) - (right.assignedAt ?? right.updatedAt);
+        return time || left.userId.localeCompare(right.userId);
+      });
+      for (const [index, previousAssignment] of candidates.entries()) {
+        const player = playerById.get(previousAssignment.userId)!;
+        if (index < table.capacity) {
+          next.set(player.userId, {
+            assignmentId: next.get(player.userId)!.assignmentId,
+            tableId: table.tableId,
+            desiredTableId: table.tableId,
+            userId: player.userId,
+            displayName: player.displayName || player.userId,
+            status: "assigned",
+            waitlistPosition: null,
+            assignedAt:
+              previousAssignment.status === "assigned"
+                ? (previousAssignment.assignedAt ?? this.now())
+                : this.now(),
+          });
+        } else {
+          next.set(player.userId, {
+            assignmentId: next.get(player.userId)!.assignmentId,
+            tableId: null,
+            desiredTableId: table.tableId,
+            userId: player.userId,
+            displayName: player.displayName || player.userId,
+            status: "waitlisted",
+            waitlistPosition: index - table.capacity + 1,
+          });
+        }
+      }
+    }
+
+    return players.map((player) => next.get(player.userId)!);
   }
 
   async generatePlan(
@@ -539,6 +694,14 @@ export class WeekService {
       );
     }
 
+    const previousPlan =
+      event.status === "published"
+        ? await this.repository.getCurrentPlan(event.eventId)
+        : null;
+    const previousBundle =
+      previousPlan?.status === "published"
+        ? await this.repository.getPlanBundle(previousPlan.planId)
+        : null;
     const [players, gms, stats] = await Promise.all([
       this.repository.listActiveSignups(event.eventId, "player"),
       this.repository.listActiveSignups(event.eventId, "gm"),
@@ -581,18 +744,18 @@ export class WeekService {
     const planId = this.id();
     const tableIds = planned.tables.map(() => this.id());
     const generation = await this.repository.getNextPlanGeneration(event.eventId);
-    // Every active player begins unassigned. The planner's overflow is a
-    // projected capacity shortfall for admin review, not a live table
-    // waitlist. Live waitlists are created atomically only when a player
-    // chooses a table that is already full.
-    const assignments = players.map((player) => ({
-        assignmentId: this.id(),
-        tableId: null,
-        userId: player.userId,
-        displayName: player.displayName ?? player.userId,
-        status: "unassigned" as const,
-        waitlistPosition: null,
-      }));
+    const tables: SaveDraftPlanInput["tables"] = planned.tables.map((table, index) => ({
+      tableId: tableIds[index],
+      tableNumber: table.tableNumber,
+      title: "Table " + table.tableNumber,
+      capacity: table.capacity,
+      gmUserId: table.gm.userId,
+      gmDisplayName: table.gm.displayName ?? table.gm.userId,
+    }));
+    // A revision keeps choices only when the selected GM still owns a table.
+    // Assigned players retain first claim on capacity; compatible waitlists
+    // preserve their stable order and fill any remaining seats.
+    const assignments = this.carryForwardAssignments(players, tables, previousBundle);
 
     const bundle = await this.repository.saveDraftPlan({
       plan: {
@@ -609,14 +772,7 @@ export class WeekService {
         waitlistCount: planned.waitlist.length,
         createdByUserId: actorUserId ?? null,
       },
-      tables: planned.tables.map((table, index) => ({
-        tableId: tableIds[index],
-        tableNumber: table.tableNumber,
-        title: "Table " + table.tableNumber,
-        capacity: table.capacity,
-        gmUserId: table.gm.userId,
-        gmDisplayName: table.gm.displayName ?? table.gm.userId,
-      })),
+      tables,
       assignments,
     });
     if (event.status === "locked") {
@@ -801,7 +957,7 @@ export class WeekService {
     event: WeeklyEvent,
     bundle: PlanBundle,
     table: PlanTable,
-    closed = false,
+    closed?: boolean,
   ): PublishedTableInput {
     return {
       planId: bundle.plan.planId,
@@ -821,7 +977,7 @@ export class WeekService {
         .map((assignment) => assignment.displayName),
       eventTitle: event.title,
       startsAt: event.startsAt,
-      closed,
+      closed: closed ?? this.now() >= event.tableSelectionClosesAt,
     };
   }
 
@@ -845,10 +1001,16 @@ export class WeekService {
     guildId: string,
     actorUserId?: string,
     retryFailed = false,
+    eventId?: string,
   ): Promise<{ event: WeeklyEvent; bundle: PlanBundle; links: string[] }> {
     const config = await this.requireConfig(guildId);
-    const event = await this.repository.getCurrentWeeklyEvent(guildId);
+    const event = eventId
+      ? await this.repository.getWeeklyEvent(eventId)
+      : await this.repository.getCurrentWeeklyEvent(guildId);
     if (!event) throw new UserFacingError("There is no active week to publish.");
+    if (event.guildId !== guildId) {
+      throw new UserFacingError("That weekly event belongs to a different server.");
+    }
     const draft = await this.repository.getLatestDraftPlan(event.eventId);
     const current = await this.repository.getCurrentPlan(event.eventId);
     const plan = draft ?? (current?.status === "published" ? current : null);
@@ -1014,11 +1176,19 @@ export class WeekService {
       throw new UserFacingError("That table plan is not currently published.");
     }
     const event = await this.repository.getWeeklyEvent(plan.eventId);
-    if (!event || event.status !== "published") {
+    if (!event) {
       throw new UserFacingError("Table selection is closed for this week.");
     }
     if (event.guildId !== input.guildId) {
       throw new UserFacingError("That table plan belongs to a different server.");
+    }
+    if (
+      event.status !== "published" ||
+      this.now() >= event.tableSelectionClosesAt
+    ) {
+      throw new UserFacingError(
+        "Table selection closed " + unix(event.tableSelectionClosesAt) + ".",
+      );
     }
 
     const previous = await this.repository.getAssignment(input.planId, input.userId);
@@ -1028,26 +1198,37 @@ export class WeekService {
       ),
     );
     let message: string;
-    if (input.action === "join") {
-      const result = await this.repository.joinOrWaitlist(
-        input.planId,
-        input.userId,
-        input.tableId,
-      );
-      message =
-        result.outcome === "assigned"
-          ? "You joined this table."
-          : "This table is full; you are waitlisted at position " + result.position + ".";
-    } else {
-      const result = await this.repository.leaveTableAndPromote(
-        input.planId,
-        input.userId,
-      );
-      message = result.left
-        ? result.promoted
-          ? "You left the table and " + result.promoted.displayName + " was promoted."
-          : "You left the table."
-        : "You did not have an active table choice.";
+    let joinedWaitlist = false;
+    try {
+      if (input.action === "join") {
+        const result = await this.repository.joinOrWaitlist(
+          input.planId,
+          input.userId,
+          input.tableId,
+        );
+        message =
+          result.outcome === "assigned"
+            ? "You joined this table."
+            : "This table is full; you are waitlisted at position " + result.position + ".";
+        joinedWaitlist = result.outcome === "waitlisted";
+      } else {
+        const result = await this.repository.leaveTableAndPromote(
+          input.planId,
+          input.userId,
+        );
+        message = result.left
+          ? result.promoted
+            ? "You left the table and " + result.promoted.displayName + " was promoted."
+            : "You left the table."
+          : "You did not have an active table choice.";
+      }
+    } catch (error) {
+      if (error instanceof TableSelectionUnavailableError) {
+        throw new UserFacingError(
+          "Table selection closed " + unix(event.tableSelectionClosesAt) + ".",
+        );
+      }
+      throw error;
     }
 
     const bundle = await this.reconcilePublishedTableMessages(
@@ -1058,6 +1239,23 @@ export class WeekService {
     if (!bundle) throw new UserFacingError("The published plan could not be refreshed.");
     const table = bundle.tables.find((candidate) => candidate.tableId === input.tableId);
     if (!table) throw new UserFacingError("That table no longer exists.");
+    if (joinedWaitlist) {
+      const openTables = bundle.tables.filter((candidate) => {
+        if (candidate.tableId === input.tableId) return false;
+        const occupied = bundle.assignments.filter(
+          (assignment) =>
+            assignment.status === "assigned" &&
+            assignment.tableId === candidate.tableId,
+        ).length;
+        return occupied < candidate.capacity;
+      });
+      if (openTables.length) {
+        message +=
+          " Open tables with seats: " +
+          openTables.map((candidate) => safeInline(candidate.title)).join(", ") +
+          ".";
+      }
+    }
     return {
       message,
       payload: renderPublishedTable(this.publishedTableInput(event, bundle, table)),
@@ -1143,7 +1341,7 @@ export class WeekService {
   async refreshPublishedTables(
     event: WeeklyEvent,
     bundle: PlanBundle,
-    closed = false,
+    closed?: boolean,
   ): Promise<void> {
     await Promise.all(
       bundle.tables.map(async (table) => {
@@ -1155,6 +1353,134 @@ export class WeekService {
         );
       }),
     );
+  }
+
+  async finalizeTables(
+    guildId: string,
+    eventId?: string,
+  ): Promise<{
+    event: WeeklyEvent;
+    bundle: PlanBundle;
+    channelId: string;
+    messageId: string;
+  }> {
+    const event = eventId
+      ? await this.repository.getWeeklyEvent(eventId)
+      : await this.repository.getCurrentWeeklyEvent(guildId);
+    if (!event) throw new UserFacingError("There is no week to finalize.");
+    if (event.guildId !== guildId) {
+      throw new UserFacingError("That weekly event belongs to a different server.");
+    }
+    if (event.status !== "published" && event.status !== "archived") {
+      throw new UserFacingError("Only a published week can be finalized.");
+    }
+    if (this.now() < event.tableSelectionClosesAt) {
+      throw new UserFacingError(
+        "The final roster cannot be created until table selection closes " +
+          unix(event.tableSelectionClosesAt) +
+          ".",
+      );
+    }
+    const plan = await this.repository.getCurrentPlan(event.eventId);
+    if (!plan || plan.status !== "published") {
+      throw new UserFacingError("The week has no authoritative published plan.");
+    }
+    const bundle = await this.repository.getPlanBundle(plan.planId);
+    if (!bundle) throw new UserFacingError("The published plan could not be loaded.");
+
+    await this.refreshPublishedTables(event, bundle, true);
+    const payload = renderFinalManifest({
+      planId: plan.planId,
+      generation: plan.generation,
+      eventTitle: event.title,
+      startsAt: event.startsAt,
+      tables: bundle.tables.map((table) => ({
+        id: table.tableId,
+        label: table.title,
+        gmName: table.gmDisplayName,
+        capacity: table.capacity,
+        players: bundle.assignments
+          .filter(
+            (assignment) =>
+              assignment.status === "assigned" && assignment.tableId === table.tableId,
+          )
+          .map((assignment) => assignment.displayName),
+        waitlist: bundle.assignments
+          .filter(
+            (assignment) =>
+              assignment.status === "waitlisted" &&
+              assignment.desiredTableId === table.tableId,
+          )
+          .sort(
+            (left, right) =>
+              (left.waitlistPosition ?? Number.MAX_SAFE_INTEGER) -
+                (right.waitlistPosition ?? Number.MAX_SAFE_INTEGER) ||
+              left.userId.localeCompare(right.userId),
+          )
+          .map((assignment) => assignment.displayName),
+      })),
+      unassigned: bundle.assignments
+        .filter((assignment) => assignment.status === "unassigned")
+        .map((assignment) => assignment.displayName),
+    });
+
+    const expectedTableStateVersion = event.tableStateVersion;
+    const finalizationWasCurrent =
+      Boolean(event.finalManifestChannelId && event.finalManifestMessageId) &&
+      event.finalizedPlanId === plan.planId &&
+      event.finalizedTableStateVersion === expectedTableStateVersion;
+    let channelId = event.finalManifestChannelId;
+    let messageId = event.finalManifestMessageId;
+    if (channelId && messageId) {
+      await this.discord.editChannelMessage(channelId, messageId, payload);
+    } else {
+      const config = await this.requireConfig(guildId);
+      channelId = config.tableChannelId ?? config.eventChannelId;
+      if (!channelId) throw new UserFacingError("No table channel is configured.");
+      const message = await this.discord.sendChannelMessage(channelId, {
+        ...payload,
+        nonce: discordNonce(
+          "manifest:" + event.eventId + ":" + plan.planId + ":" + expectedTableStateVersion,
+        ),
+        enforce_nonce: true,
+      });
+      messageId = message.id;
+    }
+    if (!channelId || !messageId) {
+      throw new Error("The final manifest location could not be resolved.");
+    }
+    const finalizedAt = this.now();
+    const stored = await this.repository.setFinalManifest(
+      event.eventId,
+      channelId,
+      messageId,
+      plan.planId,
+      expectedTableStateVersion,
+      finalizedAt,
+    );
+    if (!stored) {
+      throw new Error(
+        "The published plan or table roster changed while the final manifest was being written.",
+      );
+    }
+    if (!finalizationWasCurrent) {
+      await this.repository.appendAudit({
+        guildId,
+        eventId: event.eventId,
+        action: "tables.finalized",
+        entityType: "plan",
+        entityId: plan.planId,
+        details: {
+          channelId,
+          messageId,
+          generation: plan.generation,
+          tableStateVersion: expectedTableStateVersion,
+          finalizedAt,
+        },
+      });
+    }
+    const latest = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
+    return { event: latest, bundle, channelId, messageId };
   }
 
   async archiveWeek(
@@ -1178,6 +1504,30 @@ export class WeekService {
         "Only planned or published weeks can be archived. Use /week cancel for an unfinished week.",
       );
     }
+    const planBeforeArchive = await this.repository.getCurrentPlan(event.eventId);
+    const hasPublishedPlan =
+      (event.status === "published" || event.status === "archived") &&
+      planBeforeArchive?.status === "published";
+    if (hasPublishedPlan) await this.finalizeTables(guildId, event.eventId);
+
+    const projectedArchived: WeeklyEvent = {
+      ...event,
+      status: "archived",
+      archivedAt: event.archivedAt ?? this.now(),
+      updatedAt: this.now(),
+    };
+    if (projectedArchived.signupChannelId && projectedArchived.signupMessageId) {
+      await this.discord.editChannelMessage(
+        projectedArchived.signupChannelId,
+        projectedArchived.signupMessageId,
+        await this.signupPayload(projectedArchived),
+      );
+    }
+    if (planBeforeArchive && !hasPublishedPlan) {
+      const bundle = await this.repository.getPlanBundle(planBeforeArchive.planId);
+      if (bundle) await this.refreshPublishedTables(projectedArchived, bundle, true);
+    }
+
     if (event.status !== "archived") {
       const changed = await this.repository.transitionEventStatus(
         event.eventId,
@@ -1187,18 +1537,6 @@ export class WeekService {
       if (!changed) throw new UserFacingError("The week changed; run /week status and retry.");
     }
     const archived = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
-    if (archived.signupChannelId && archived.signupMessageId) {
-      await this.discord.editChannelMessage(
-        archived.signupChannelId,
-        archived.signupMessageId,
-        await this.signupPayload(archived),
-      );
-    }
-    const plan = await this.repository.getCurrentPlan(event.eventId);
-    if (plan) {
-      const bundle = await this.repository.getPlanBundle(plan.planId);
-      if (bundle) await this.refreshPublishedTables(archived, bundle, true);
-    }
     await this.repository.appendAudit({
       guildId,
       eventId: event.eventId,
@@ -1253,6 +1591,21 @@ export class WeekService {
       details: { reason },
     });
     return cancelled;
+  }
+
+  async exportSnapshot(
+    guildId: string,
+    eventId?: string,
+  ): Promise<{
+    event: WeeklyEvent;
+    signups: Signup[];
+    planBundle: PlanBundle | null;
+  }> {
+    const snapshot = await this.repository.getWeeklyExportSnapshot(guildId, eventId);
+    if (!snapshot) {
+      throw new UserFacingError("There is no weekly event to export for this server.");
+    }
+    return snapshot;
   }
 
   async planBundleForCurrent(guildId: string): Promise<{

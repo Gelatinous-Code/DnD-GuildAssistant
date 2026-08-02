@@ -3,6 +3,7 @@ import {
   RoleService,
   formatRoleDiagnostics,
   formatRoleReport,
+  requireSuccessfulRoleReconciliation,
 } from "../src/role-service";
 import type { DiscordGuildMember } from "../src/discord-api";
 import type {
@@ -81,6 +82,7 @@ describe("role service replacement cleanup", () => {
       tableMaxSize: 6,
       schedulingEnabled: true,
       roleSyncEnabled: true,
+      autoPublishEnabled: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -92,6 +94,7 @@ describe("role service replacement cleanup", () => {
       endsAt: now + 90_000_000,
       signupOpensAt: now - 86_400_000,
       signupLocksAt: now,
+      tableSelectionClosesAt: now + 86_400_000,
       status: "published",
       source: "native",
       sourceExternalId: null,
@@ -99,6 +102,12 @@ describe("role service replacement cleanup", () => {
       signupMessageId: null,
       tableChannelId: null,
       tableMessageId: null,
+      finalManifestChannelId: null,
+      finalManifestMessageId: null,
+      tableStateVersion: 0,
+      finalizedPlanId: null,
+      finalizedTableStateVersion: null,
+      tablesFinalizedAt: null,
       createdByUserId: null,
       createdAt: now,
       updatedAt: now,
@@ -292,5 +301,203 @@ describe("role service replacement cleanup", () => {
     expect(
       leases.filter((lease) => lease.releasedAt === null && lease.roleId === oldRoleId),
     ).toEqual([]);
+  });
+});
+
+function cleanupHarness(failingRoleId?: string) {
+  const guildId = "100000000000000010";
+  const currentRoleId = "200000000000000010";
+  const historicalRoleId = "200000000000000011";
+  const currentLeaseUserId = "300000000000000010";
+  const historicalLeaseUserId = "300000000000000011";
+  const manualUserId = "300000000000000012";
+  const now = 1_800_000_000_000;
+  const config: GuildConfig = {
+    guildId,
+    eventChannelId: "400000000000000010",
+    tableChannelId: "400000000000000010",
+    reminderChannelId: "400000000000000010",
+    adminRoleId: null,
+    gmRoleId: currentRoleId,
+    reminderRoleId: null,
+    timezone: "America/Denver",
+    weeklyDay: 6,
+    weeklyTime: "18:30",
+    eventDurationMinutes: 240,
+    signupOpenLeadDays: 7,
+    signupLockLeadHours: 24,
+    tableMinSize: 4,
+    tablePreferredSize: 6,
+    tableMaxSize: 6,
+    schedulingEnabled: true,
+    roleSyncEnabled: false,
+    autoPublishEnabled: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+  let leases: RoleLease[] = [
+    {
+      leaseId: "lease-current",
+      guildId,
+      eventId: null,
+      userId: currentLeaseUserId,
+      roleId: currentRoleId,
+      reason: "Selected as a weekly GM",
+      grantedAt: now,
+      lastVerifiedAt: null,
+      releasedAt: null,
+      releaseReason: null,
+    },
+    {
+      leaseId: "lease-historical",
+      guildId,
+      eventId: null,
+      userId: historicalLeaseUserId,
+      roleId: historicalRoleId,
+      reason: "Selected as a weekly GM",
+      grantedAt: now,
+      lastVerifiedAt: null,
+      releasedAt: null,
+      releaseReason: null,
+    },
+  ];
+  const memberRoles = new Map<string, Set<string>>([
+    [currentLeaseUserId, new Set([currentRoleId])],
+    [historicalLeaseUserId, new Set([historicalRoleId])],
+    [manualUserId, new Set([currentRoleId, historicalRoleId])],
+  ]);
+  const repository = {
+    getGuildConfig: vi.fn(async () => config),
+    getCurrentPublishedEvent: vi.fn(async () => null),
+    getCurrentPlan: vi.fn(async () => null),
+    getPlanBundle: vi.fn(async () => null),
+    listActiveRoleLeases: vi.fn(async (_guildId: string, roleId?: string) =>
+      leases.filter(
+        (lease) =>
+          lease.releasedAt === null &&
+          (roleId === undefined || lease.roleId === roleId),
+      ),
+    ),
+    acquireRoleLease: vi.fn(async () => {
+      throw new Error("cleanup must not acquire leases");
+    }),
+    releaseRoleLease: vi.fn(async (leaseId: string, reason: string) => {
+      const index = leases.findIndex(
+        (lease) => lease.leaseId === leaseId && lease.releasedAt === null,
+      );
+      if (index < 0) return false;
+      leases[index] = { ...leases[index], releasedAt: now, releaseReason: reason };
+      return true;
+    }),
+    appendAudit: vi.fn(async () => 1),
+  };
+  const discord = {
+    getGuildMember: vi.fn(async (_guildId: string, userId: string) => ({
+      user: { id: userId, username: userId },
+      roles: [...(memberRoles.get(userId) ?? new Set<string>())],
+    }) satisfies DiscordGuildMember),
+    getGuildRoles: vi.fn(async () => []),
+    getCurrentBotGuildMember: vi.fn(async () => ({ roles: [] })),
+    addMemberRole: vi.fn(async () => undefined),
+    removeMemberRole: vi.fn(
+      async (_guildId: string, userId: string, roleId: string) => {
+        if (roleId === failingRoleId) throw new Error("Discord missing permissions");
+        memberRoles.get(userId)?.delete(roleId);
+      },
+    ),
+  };
+
+  return {
+    guildId,
+    currentRoleId,
+    historicalRoleId,
+    currentLeaseUserId,
+    historicalLeaseUserId,
+    manualUserId,
+    config,
+    repository,
+    discord,
+    memberRoles,
+    activeLeases: () => leases.filter((lease) => lease.releasedAt === null),
+    service: new RoleService(repository, discord),
+  };
+}
+
+describe("role service release-all cleanup", () => {
+  it("bypasses paused sync, removes current and historical leased roles, and preserves manual roles", async () => {
+    const fixture = cleanupHarness();
+
+    const report = await fixture.service.cleanupAllLeasedRoles(fixture.guildId);
+
+    expect(report.ok).toBe(true);
+    expect(report.plan.removeRoleUserIds).toEqual([
+      fixture.currentLeaseUserId,
+      fixture.historicalLeaseUserId,
+    ]);
+    expect(fixture.activeLeases()).toEqual([]);
+    expect(fixture.memberRoles.get(fixture.currentLeaseUserId)).toEqual(new Set());
+    expect(fixture.memberRoles.get(fixture.historicalLeaseUserId)).toEqual(new Set());
+    expect(fixture.memberRoles.get(fixture.manualUserId)).toEqual(
+      new Set([fixture.currentRoleId, fixture.historicalRoleId]),
+    );
+    expect(fixture.discord.getGuildMember).not.toHaveBeenCalledWith(
+      fixture.guildId,
+      fixture.manualUserId,
+    );
+    expect(fixture.repository.acquireRoleLease).not.toHaveBeenCalled();
+    expect(fixture.repository.releaseRoleLease).toHaveBeenCalledWith(
+      "lease-current",
+      "Weekly GM role configuration cleared",
+    );
+    expect(fixture.repository.releaseRoleLease).toHaveBeenCalledWith(
+      "lease-historical",
+      "Weekly GM role configuration cleared",
+    );
+    expect(fixture.repository.appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "roles.cleaned-up" }),
+    );
+  });
+
+  it("supports a dry-run without mutating roles or releasing leases", async () => {
+    const fixture = cleanupHarness();
+
+    const report = await fixture.service.cleanupAllLeasedRoles(fixture.guildId, true);
+
+    expect(report.ok).toBe(true);
+    expect(report.dryRun).toBe(true);
+    expect(report.plan.removeRoleUserIds).toEqual([
+      fixture.currentLeaseUserId,
+      fixture.historicalLeaseUserId,
+    ]);
+    expect(fixture.discord.removeMemberRole).not.toHaveBeenCalled();
+    expect(fixture.repository.releaseRoleLease).not.toHaveBeenCalled();
+    expect(fixture.activeLeases()).toHaveLength(2);
+    expect(fixture.repository.appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "roles.cleanup-previewed" }),
+    );
+  });
+
+  it("retains failed leases and converts a partial report into a retryable error", async () => {
+    const fixture = cleanupHarness("200000000000000011");
+
+    const report = await fixture.service.cleanupAllLeasedRoles(fixture.guildId);
+
+    expect(report.ok).toBe(false);
+    expect(fixture.activeLeases()).toEqual([
+      expect.objectContaining({ leaseId: "lease-historical" }),
+    ]);
+    expect(() =>
+      requireSuccessfulRoleReconciliation(report, "Weekly GM role cleanup"),
+    ).toThrow(/Weekly GM role cleanup failed.*Discord missing permissions/);
+  });
+
+  it("requires the currently configured GM role even when leases remain", async () => {
+    const fixture = cleanupHarness();
+    fixture.config.gmRoleId = null;
+
+    await expect(
+      fixture.service.cleanupAllLeasedRoles(fixture.guildId),
+    ).rejects.toThrow("No weekly GM role is configured");
+    expect(fixture.discord.removeMemberRole).not.toHaveBeenCalled();
   });
 });

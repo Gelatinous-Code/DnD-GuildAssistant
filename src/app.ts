@@ -2,6 +2,7 @@ import {
   DiscordRestClient,
   discordTimestamp,
   safeAllowedMentions,
+  type DiscordMessagePayload,
 } from "./discord-api";
 import {
   InteractionResponseType,
@@ -20,7 +21,6 @@ import {
   parseComponentId,
   requireGuild,
   stringOption,
-  updateMessage,
   UserFacingError,
 } from "./interaction-utils";
 import {
@@ -41,14 +41,194 @@ import {
 import {
   formatRoleDiagnostics,
   formatRoleReport,
+  requireSuccessfulRoleReconciliation,
   RoleService,
 } from "./role-service";
+import { nextWeeklyOccurrence } from "./schedule";
 import { runScheduledTick, schedulerOperationKey } from "./scheduler";
 import {
   GuildRepository,
+  type GuildConfig,
   type WeeklyEvent,
 } from "./storage/repository";
 import { WeekService } from "./week-service";
+import {
+  generateWeeklyRosterCsv,
+  WeeklyExportLimitError,
+} from "./weekly-export";
+
+const WEEKDAY_NAMES = [
+  "",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+] as const;
+
+interface InternalAttachmentResponse {
+  filename: string;
+  contentType: string;
+  content: string;
+  audit?: {
+    guildId: string;
+    eventId: string;
+    actorUserId?: string;
+    details: Record<string, unknown>;
+  };
+}
+
+async function recordAttachmentDelivery(
+  env: Env,
+  attachment: InternalAttachmentResponse,
+  status: "succeeded" | "failed",
+  error?: unknown,
+): Promise<void> {
+  if (!attachment.audit) return;
+  try {
+    await new GuildRepository(env.DB).appendAudit({
+      guildId: attachment.audit.guildId,
+      eventId: attachment.audit.eventId,
+      actorUserId: attachment.audit.actorUserId,
+      action:
+        status === "succeeded"
+          ? "week.roster-exported"
+          : "week.roster-export-delivery-failed",
+      entityType: "weekly_event",
+      entityId: attachment.audit.eventId,
+      details: {
+        ...attachment.audit.details,
+        deliveryStatus: status,
+        ...(status === "failed"
+          ? { errorKind: error instanceof Error ? error.name : typeof error }
+          : {}),
+      },
+    });
+  } catch (auditError) {
+    console.error(
+      JSON.stringify({
+        kind: "guild-assistant.attachment-audit-error",
+        eventId: attachment.audit.eventId,
+        deliveryStatus: status,
+        errorKind: auditError instanceof Error ? auditError.name : typeof auditError,
+      }),
+    );
+  }
+}
+
+function weekdayName(weekday: number): string {
+  return WEEKDAY_NAMES[weekday] ?? `weekday ${weekday}`;
+}
+
+function automationMode(config: Pick<GuildConfig, "schedulingEnabled" | "autoPublishEnabled">): string {
+  if (!config.schedulingEnabled) return "paused";
+  return config.autoPublishEnabled ? "autopilot" : "review before publish";
+}
+
+function setupDashboard(config: GuildConfig | null): string {
+  const timezone = config?.timezone ?? "America/Denver";
+  const weeklyDay = config?.weeklyDay ?? 6;
+  const weeklyTime = config?.weeklyTime ?? "18:30";
+  const next = Date.parse(
+    nextWeeklyOccurrence(
+      { weekday: weeklyDay, time: weeklyTime, timeZone: timezone },
+      new Date().toISOString(),
+    ),
+  );
+  return [
+    "## Guild Assistant setup",
+    config
+      ? "Your saved configuration is shown below. Supply only the options you want to change."
+      : "Nothing has been saved yet. Only `channel` is required; every other field has a safe default.",
+    "",
+    `${config?.eventChannelId ? "✅" : "❌"} **Operations channel:** ${
+      config?.eventChannelId ? `<#${config.eventChannelId}>` : "choose a text channel"
+    }`,
+    `${config?.gmRoleId ? "✅" : "➖"} **Weekly GM role (optional):** ${
+      config?.gmRoleId ? `<@&${config.gmRoleId}>` : "skipped; role automation can remain off"
+    }`,
+    `✅ **Schedule:** ${weekdayName(weeklyDay)} at ${weeklyTime} (${timezone})`,
+    `**Next game:** ${discordTimestamp(next)} (${discordTimestamp(next, "R")})`,
+    `✅ **Tables:** ${config?.tableMinSize ?? 4} minimum / ${
+      config?.tablePreferredSize ?? 6
+    } preferred / ${config?.tableMaxSize ?? 6} maximum`,
+    `${config?.reminderRoleId ? "✅" : "➖"} **Reminder role (optional):** ${
+      config?.reminderRoleId ? `<@&${config.reminderRoleId}>` : "channel-only reminders are available"
+    }`,
+    `${config?.adminRoleId ? "✅" : "➖"} **Organizer escalation role (optional):** ${
+      config?.adminRoleId ? `<@&${config.adminRoleId}>` : "skipped"
+    }`,
+    `⏸️ **Automation mode:** ${config ? automationMode(config) : "paused"}`,
+    "",
+    config
+      ? "Next: run `/guild doctor`, then `/guild automation mode:Autopilot confirm:True` when ready."
+      : "Next: run `/guild setup channel:#your-channel`, then `/guild doctor`. Add a normal `Weekly GM` role only if you want automatic role assignment.",
+  ].join("\n");
+}
+
+function ephemeralAttachment(
+  content: string,
+  attachment: InternalAttachmentResponse,
+): Response {
+  return Response.json({
+    type: InteractionResponseType.ChannelMessageWithSource,
+    data: {
+      content,
+      flags: MessageFlags.Ephemeral,
+      allowed_mentions: safeAllowedMentions(),
+    },
+    attachment,
+  });
+}
+
+function boundedDiscordContent(content: string): string {
+  return content.length <= 1_950 ? content : `${content.slice(0, 1_949)}…`;
+}
+
+async function coreAutomationProblems(
+  discord: DiscordRestClient,
+  guildId: string,
+  config: GuildConfig,
+): Promise<string[]> {
+  const channelIds = [
+    config.eventChannelId,
+    config.tableChannelId,
+    config.reminderChannelId,
+  ].filter((value): value is string => Boolean(value));
+  if (!config.eventChannelId) return ["Choose an operations channel in /guild setup."];
+
+  const [roles, botMember] = await Promise.all([
+    discord.getGuildRoles(guildId),
+    discord.getCurrentBotGuildMember(guildId),
+  ]);
+  const problems: string[] = [];
+  for (const channelId of [...new Set(channelIds)]) {
+    try {
+      const channel = await discord.getChannel(channelId);
+      if (channel.guild_id && channel.guild_id !== guildId) {
+        problems.push(`Channel ${channelId} belongs to another server.`);
+        continue;
+      }
+      if (![0, 5].includes(channel.type)) {
+        problems.push(`<#${channelId}> must be a normal text or announcement channel.`);
+        continue;
+      }
+      const checks = diagnoseChannelPermissions(
+        effectiveChannelPermissions({ guildId, channel, roles, botMember }),
+      );
+      problems.push(
+        ...checks
+          .filter((check) => check.level === "failure")
+          .map((check) => `<#${channelId}> ${check.name}: ${check.detail}`),
+      );
+    } catch {
+      problems.push(`Channel ${channelId} is missing or invisible to the bot.`);
+    }
+  }
+  return problems;
+}
 
 function requireAdmin(interaction: DiscordInteraction): void {
   if (!isGuildAdmin(interaction)) {
@@ -76,7 +256,13 @@ function services(env: Env): {
   };
 }
 
-type RecoverableSchedulerAction = "open" | "lock-plan" | "archive";
+type RecoverableSchedulerAction =
+  | "open"
+  | "lock-plan"
+  | "publish"
+  | "roles"
+  | "finalize"
+  | "archive";
 
 async function runSchedulerRecovery(
   repository: GuildRepository,
@@ -84,14 +270,15 @@ async function runSchedulerRecovery(
   action: RecoverableSchedulerAction,
   actorUserId: string | undefined,
   work: () => Promise<void>,
+  operationEntityId = event.eventId,
 ): Promise<"completed" | "already-completed"> {
-  const operationKey = schedulerOperationKey(action, event.eventId);
+  const operationKey = schedulerOperationKey(action, operationEntityId);
   const claim = await repository.beginOperation({
     operationKey,
     guildId: event.guildId,
     eventId: event.eventId,
     operationKind: "scheduler-" + action,
-    request: { action, source: "admin-retry" },
+    request: { action, entityId: operationEntityId, source: "admin-retry" },
   });
   let ownsClaim = claim.claimed;
   if (!ownsClaim && claim.operation.status !== "succeeded") {
@@ -134,14 +321,15 @@ async function skipSchedulerStep(
   action: RecoverableSchedulerAction,
   actorUserId: string | undefined,
   reason: string,
+  operationEntityId = event.eventId,
 ): Promise<"skipped" | "already-completed"> {
-  const operationKey = schedulerOperationKey(action, event.eventId);
+  const operationKey = schedulerOperationKey(action, operationEntityId);
   const claim = await repository.beginOperation({
     operationKey,
     guildId: event.guildId,
     eventId: event.eventId,
     operationKind: "scheduler-" + action,
-    request: { action, source: "admin-skip" },
+    request: { action, entityId: operationEntityId, source: "admin-skip" },
   });
   let ownsClaim = claim.claimed;
   if (!ownsClaim && claim.operation.status !== "succeeded") {
@@ -169,30 +357,18 @@ async function skipSchedulerStep(
   return "skipped";
 }
 
-function setupSummary(config: {
-  eventChannelId: string | null;
-  gmRoleId: string | null;
-  adminRoleId: string | null;
-  reminderRoleId: string | null;
-  timezone: string;
-  weeklyDay: number;
-  weeklyTime: string;
-  tableMinSize: number;
-  tablePreferredSize: number;
-  tableMaxSize: number;
-  schedulingEnabled: boolean;
-  roleSyncEnabled: boolean;
-}): string {
+function setupSummary(config: GuildConfig): string {
   return [
     "✅ Guild configuration saved.",
     "**Channel:** " + (config.eventChannelId ? "<#" + config.eventChannelId + ">" : "missing"),
-    "**Weekly GM role:** " + (config.gmRoleId ? "<@&" + config.gmRoleId + ">" : "missing"),
+    "**Weekly GM role:** " +
+      (config.gmRoleId ? "<@&" + config.gmRoleId + ">" : "optional; not configured"),
     "**Organizer escalation role:** " +
       (config.adminRoleId ? "<@&" + config.adminRoleId + ">" : "not set"),
     "**Reminder role:** " +
       (config.reminderRoleId ? "<@&" + config.reminderRoleId + ">" : "not set"),
-    "**Schedule:** ISO weekday " +
-      config.weeklyDay +
+    "**Schedule:** " +
+      weekdayName(config.weeklyDay) +
       " at " +
       config.weeklyTime +
       " (" +
@@ -204,8 +380,13 @@ function setupSummary(config: {
       config.tablePreferredSize +
       " / " +
       config.tableMaxSize,
-    "**Automation:** scheduling " +
-      (config.schedulingEnabled ? "on" : "paused") +
+    "**Signup timing:** opens " +
+      config.signupOpenLeadDays +
+      " days before play; locks " +
+      config.signupLockLeadHours +
+      " hours before play; table selection closes at game time.",
+    "**Automation:** " +
+      automationMode(config) +
       ", GM role sync " +
       (config.roleSyncEnabled ? "on" : "paused"),
   ].join("\n");
@@ -218,23 +399,45 @@ async function handleGuildCommand(
   requireAdmin(interaction);
   const guildId = requireGuild(interaction);
   const invocation = parseCommand(interaction);
-  const { repository, discord, week, roles } = services(env);
+  const { repository, discord, week, roles, reminders } = services(env);
 
   if (invocation.subcommand === "setup") {
     const current = await repository.getGuildConfig(guildId);
-    const channelId = stringOption(invocation, "channel");
-    const gmRoleId = stringOption(invocation, "gm_role");
-    if (!channelId || !gmRoleId) {
-      throw new UserFacingError("channel and gm_role are required.");
-    }
-    const channel = await discord.getChannel(channelId);
-    if (channel.guild_id && channel.guild_id !== guildId) {
-      throw new UserFacingError("The selected channel belongs to a different server.");
-    }
-    if (![0, 5].includes(channel.type)) {
+    if (invocation.options.size === 0) return ephemeral(setupDashboard(current));
+
+    const selectedChannelId = stringOption(invocation, "channel");
+    const channelId = selectedChannelId ?? current?.eventChannelId;
+    if (!channelId) {
       throw new UserFacingError(
-        "Choose a normal text or announcement channel for the MVP workflow.",
+        "Choose an operations channel once. The Weekly GM role and every other setting are optional.",
       );
+    }
+    if (selectedChannelId) {
+      const channel = await discord.getChannel(selectedChannelId);
+      if (channel.guild_id && channel.guild_id !== guildId) {
+        throw new UserFacingError("The selected channel belongs to a different server.");
+      }
+      if (![0, 5].includes(channel.type)) {
+        throw new UserFacingError(
+          "Choose a normal text or announcement channel for the weekly workflow.",
+        );
+      }
+    }
+
+    const selectedGmRoleId = stringOption(invocation, "gm_role");
+    const selectedReminderRoleId = stringOption(invocation, "reminder_role");
+    const selectedAdminRoleId = stringOption(invocation, "admin_role");
+    const clearGmRole = booleanOption(invocation, "clear_gm_role") === true;
+    const clearReminderRole = booleanOption(invocation, "clear_reminder_role") === true;
+    const clearAdminRole = booleanOption(invocation, "clear_admin_role") === true;
+    if (clearGmRole && selectedGmRoleId) {
+      throw new UserFacingError("Choose gm_role or clear_gm_role, not both.");
+    }
+    if (clearReminderRole && selectedReminderRoleId) {
+      throw new UserFacingError("Choose reminder_role or clear_reminder_role, not both.");
+    }
+    if (clearAdminRole && selectedAdminRoleId) {
+      throw new UserFacingError("Choose admin_role or clear_admin_role, not both.");
     }
     const timezone = stringOption(invocation, "timezone") ?? current?.timezone ?? "America/Denver";
     const weeklyDay = numberOption(invocation, "weekday") ?? current?.weeklyDay ?? 6;
@@ -247,14 +450,6 @@ async function handleGuildCommand(
       numberOption(invocation, "signup_lead_days") ?? current?.signupOpenLeadDays ?? 7;
     const signupLockLeadHours =
       numberOption(invocation, "lock_lead_hours") ?? current?.signupLockLeadHours ?? 24;
-    const schedulingEnabled =
-      booleanOption(invocation, "scheduling_enabled") ??
-      current?.schedulingEnabled ??
-      false;
-    const roleSyncEnabled =
-      booleanOption(invocation, "role_sync_enabled") ??
-      current?.roleSyncEnabled ??
-      false;
     const errors = [
       ...validateGuildSchedule({
         timezone,
@@ -273,14 +468,19 @@ async function handleGuildCommand(
       throw new UserFacingError("Configuration was not saved:\n• " + errors.join("\n• "));
     }
 
+    if (clearGmRole) {
+      const cleanup = await roles.cleanupAllLeasedRoles(guildId);
+      requireSuccessfulRoleReconciliation(cleanup, "Weekly GM role cleanup");
+    }
+
     const config = await repository.saveGuildConfig({
       guildId,
-      eventChannelId: channelId,
-      tableChannelId: channelId,
-      reminderChannelId: channelId,
-      gmRoleId,
-      adminRoleId: stringOption(invocation, "admin_role"),
-      reminderRoleId: stringOption(invocation, "reminder_role"),
+      eventChannelId: selectedChannelId,
+      tableChannelId: selectedChannelId,
+      reminderChannelId: selectedChannelId,
+      gmRoleId: clearGmRole ? null : selectedGmRoleId,
+      adminRoleId: clearAdminRole ? null : selectedAdminRoleId,
+      reminderRoleId: clearReminderRole ? null : selectedReminderRoleId,
       timezone,
       weeklyDay,
       weeklyTime,
@@ -289,13 +489,12 @@ async function handleGuildCommand(
       tableMinSize,
       tablePreferredSize,
       tableMaxSize,
-      schedulingEnabled,
-      roleSyncEnabled,
+      roleSyncEnabled: clearGmRole ? false : undefined,
     });
     const permissionChecks = diagnoseInteractionPermissions(interaction.app_permissions, {
       roleSyncEnabled: config.roleSyncEnabled,
     });
-    const roleChecks = await roles.diagnose(guildId);
+    const roleChecks = config.gmRoleId ? await roles.diagnose(guildId) : null;
     const problems = [
       ...permissionChecks
         .filter((check) => check.level !== "pass")
@@ -306,7 +505,7 @@ async function handleGuildCommand(
             ": " +
             check.detail,
         ),
-      ...roleChecks.items
+      ...(roleChecks?.items ?? [])
         .filter((check) => check.status !== "pass")
         .map(
           (check) =>
@@ -316,9 +515,100 @@ async function handleGuildCommand(
             (check.remediation ?? check.detail),
         ),
     ];
-    return ephemeral(
+    return ephemeral(boundedDiscordContent(
       setupSummary(config) +
-        (problems.length ? "\n\n**Setup checks:**\n" + problems.join("\n") : "\n\n✅ Setup checks passed."),
+        (problems.length
+          ? "\n\n**Setup checks:**\n" + problems.join("\n")
+          : "\n\n✅ Core setup checks passed.") +
+        "\n\nNext: run `/guild doctor`, then choose `/guild automation` when ready.",
+    ));
+  }
+
+  if (invocation.subcommand === "automation") {
+    const config = await repository.getGuildConfig(guildId);
+    if (!config) throw new UserFacingError("Run /guild setup first.");
+    const mode = stringOption(invocation, "mode");
+    if (mode !== "paused" && mode !== "review" && mode !== "autopilot") {
+      throw new UserFacingError("Choose paused, review, or autopilot.");
+    }
+    if (booleanOption(invocation, "confirm") !== true) {
+      throw new UserFacingError("Set confirm to True to change automation mode.");
+    }
+
+    const requestedRoleSync =
+      mode === "paused"
+        ? false
+        : (booleanOption(invocation, "role_sync") ?? config.roleSyncEnabled);
+    const reminderEnabled = booleanOption(invocation, "reminders");
+    if (mode !== "paused") {
+      const problems = await coreAutomationProblems(discord, guildId, config);
+      if (problems.length) {
+        throw new UserFacingError(
+          "Automation remains paused. Fix these core checks first:\n• " + problems.join("\n• "),
+        );
+      }
+      if (requestedRoleSync) {
+        if (!config.gmRoleId) {
+          throw new UserFacingError(
+            "Role sync needs a normal Weekly GM role. Configure gm_role or leave role_sync False.",
+          );
+        }
+        const report = await roles.diagnose(guildId);
+        if (!report.ready) {
+          const failures = report.items
+            .filter((item) => item.status === "fail")
+            .map((item) => item.remediation ?? item.detail);
+          throw new UserFacingError(
+            "Role sync remains paused:\n• " + failures.join("\n• "),
+          );
+        }
+      }
+    }
+
+    if (reminderEnabled !== undefined) {
+      const reminderChannelId = config.reminderChannelId ?? config.eventChannelId;
+      if (!reminderChannelId) throw new UserFacingError("Configure an operations channel first.");
+      if (reminderEnabled && config.reminderRoleId) {
+        const role = (await discord.getGuildRoles(guildId)).find(
+          (candidate) => candidate.id === config.reminderRoleId,
+        );
+        if (!role) throw new UserFacingError("The configured reminder role no longer exists.");
+        if (!role.mentionable) {
+          throw new UserFacingError(
+            "The reminder role is not mentionable. Enable “Allow anyone to @mention this role”, then retry.",
+          );
+        }
+      }
+      await reminders.configurePreLockRule({
+        guildId,
+        channelId: reminderChannelId,
+        roleId: config.reminderRoleId ?? undefined,
+        template: "Please choose Run a Game or Play before signups close. We have {players} players and {gms} GMs.",
+        minutesBeforeLock: 48 * 60,
+        enabled: reminderEnabled,
+      });
+    }
+
+    const saved = await repository.saveGuildConfig({
+      guildId,
+      schedulingEnabled: mode !== "paused",
+      autoPublishEnabled: mode === "autopilot",
+      roleSyncEnabled: requestedRoleSync,
+    });
+    await repository.appendAudit({
+      guildId,
+      actorUserId: invokingUserId(interaction),
+      action: "guild.automation-changed",
+      entityType: "guild_config",
+      entityId: guildId,
+      details: { mode, roleSyncEnabled: requestedRoleSync, reminderEnabled },
+    });
+    return ephemeral(
+      `${mode === "paused" ? "⏸️" : "✅"} Automation mode is now **${automationMode(saved)}**.\n` +
+        `GM role sync is **${saved.roleSyncEnabled ? "on" : "paused"}**.` +
+        (reminderEnabled === undefined
+          ? " Reminder configuration was unchanged."
+          : ` Default reminders are **${reminderEnabled ? "on" : "off"}**.`),
     );
   }
 
@@ -334,12 +624,11 @@ async function handleGuildCommand(
       config.tableChannelId,
       config.reminderChannelId,
     ].filter((value): value is string => Boolean(value));
-    const [guildRoles, botMember, roleReport] = await Promise.all([
+    const [guildRoles, botMember] = await Promise.all([
       discord.getGuildRoles(guildId),
       discord.getCurrentBotGuildMember(guildId),
-      roles.diagnose(guildId),
     ]);
-    const channelResults = await Promise.all(
+    const channelChecks = await Promise.all(
       [...new Set(channelIds)].map(async (channelId) => {
         try {
           const channel = await discord.getChannel(channelId);
@@ -351,21 +640,27 @@ async function handleGuildCommand(
               botMember,
             }),
           );
-          return [
-            "✅ <#" + channel.id + "> exists.",
-            ...checks.map(
-              (check) =>
-                (check.level === "pass" ? "✅" : check.level === "warning" ? "⚠️" : "❌") +
-                " <#" +
-                channel.id +
-                "> **" +
-                check.name +
-                "** — " +
-                check.detail,
-            ),
-          ].join("\n");
+          return {
+            ready: checks.every((check) => check.level !== "failure"),
+            text: [
+              "✅ <#" + channel.id + "> exists.",
+              ...checks.map(
+                (check) =>
+                  (check.level === "pass" ? "✅" : check.level === "warning" ? "⚠️" : "❌") +
+                  " <#" +
+                  channel.id +
+                  "> **" +
+                  check.name +
+                  "** — " +
+                  check.detail,
+              ),
+            ].join("\n"),
+          };
         } catch {
-          return "❌ Channel " + channelId + " is missing or invisible. Select it again in /guild setup.";
+          return {
+            ready: false,
+            text: "❌ Channel " + channelId + " is missing or invisible. Select it again in /guild setup.",
+          };
         }
       }),
     );
@@ -383,7 +678,7 @@ async function handleGuildCommand(
       ["Reminder role", config.reminderRoleId],
       ["Organizer escalation role", config.adminRoleId],
     ].flatMap(([label, roleId]) => {
-      if (!roleId) return ["⚠️ **" + label + "** — not configured."];
+      if (!roleId) return ["➖ **" + label + "** — optional and not configured."];
       const role = guildRoles.find((candidate) => candidate.id === roleId);
       if (!role) {
         return [
@@ -401,34 +696,46 @@ async function handleGuildCommand(
             : " exists but cannot notify members. Enable “Allow anyone to @mention this role”."),
       ];
     });
-    const displayedRoleReport = config.roleSyncEnabled
-      ? roleReport
-      : {
-          ...roleReport,
-          ready: true,
-          items: roleReport.items.map((item) => ({
-            ...item,
-            status: item.status === "fail" ? ("warn" as const) : item.status,
-            remediation:
-              item.status === "fail"
-                ? "Role sync is paused; complete this fix before enabling it. " +
-                  (item.remediation ?? "")
-                : item.remediation,
-          })),
-        };
+    const roleReport = config.gmRoleId ? await roles.diagnose(guildId) : null;
+    const coreProblems = await coreAutomationProblems(discord, guildId, config);
+    const coreReady = coreProblems.length === 0 && channelChecks.every((check) => check.ready);
+    const roleReady = !config.roleSyncEnabled || Boolean(roleReport?.ready);
     return ephemeral(
-      [
-        formatRoleDiagnostics(displayedRoleReport),
+      boundedDiscordContent([
+        "## Guild Assistant doctor",
+        coreReady
+          ? "✅ **Core Discord workflow is ready.**"
+          : "❌ **Core workflow needs attention:** " + coreProblems.join(" "),
+        config.schedulingEnabled && coreReady
+          ? "✅ **Scheduled lifecycle:** running in " + automationMode(config) + " mode."
+          : config.schedulingEnabled
+            ? "❌ **Scheduled lifecycle:** configured but blocked by the core checks above."
+            : "⏸️ **Scheduled lifecycle:** paused until /guild automation is enabled.",
+        config.autoPublishEnabled
+          ? "✅ **Automatic publishing:** on."
+          : "➖ **Automatic publishing:** off; an organizer reviews and runs /week publish.",
+        config.roleSyncEnabled && roleReady
+          ? "✅ **Weekly GM role sync:** on and ready."
+          : config.roleSyncEnabled
+            ? "❌ **Weekly GM role sync:** on but needs repair."
+            : "➖ **Weekly GM role sync:** optional and paused.",
+        ...(roleReport
+          ? ["", "**Weekly GM role diagnostics**", formatRoleDiagnostics(roleReport, false)]
+          : []),
         "",
         "**Configured resources**",
-        ...channelResults,
+        ...channelChecks.map((check) => check.text),
         "",
-        "**Notification roles**",
+        "**Optional notification roles**",
         ...notificationRoleResults,
         "",
         "**Permissions in this command channel**",
         ...permissionResults,
-      ].join("\n"),
+        "",
+        coreReady
+          ? "Next: choose Review or Autopilot with /guild automation."
+          : "Next: repair the failed items, then run /guild doctor again.",
+      ].join("\n")),
     );
   }
 
@@ -488,9 +795,48 @@ async function handleWeekCommand(
       displayName,
       action,
     });
+    let automationText = "";
+    let correctionWarning = result.warning;
+    if (result.requiresReplan) {
+      const config = await repository.getGuildConfig(guildId);
+      if (config?.autoPublishEnabled) {
+        try {
+          await week.generatePlan(guildId, actorUserId, result.event.eventId);
+          const published = await week.publishPlan(
+            guildId,
+            actorUserId,
+            false,
+            result.event.eventId,
+          );
+          correctionWarning = undefined;
+          automationText =
+            "\n✅ Autopilot rebuilt and published revision " +
+            published.bundle.plan.generation +
+            ".";
+          if (config.roleSyncEnabled) {
+            try {
+              automationText += "\n" + formatRoleReport(await roles.sync(guildId));
+            } catch (error) {
+              automationText +=
+                "\n⚠️ Tables were updated, but GM role sync needs repair: " +
+                (error instanceof Error ? error.message : String(error));
+            }
+          }
+        } catch (error) {
+          correctionWarning = undefined;
+          automationText =
+            "\n⚠️ The correction was saved, but autopilot could not rebuild the plan: " +
+            (error instanceof Error ? error.message : String(error)) +
+            " Run /week status, then retry or review /week plan.";
+        }
+      } else {
+        automationText = "\n➖ The GM pool changed; review /week plan before publishing.";
+      }
+    }
     return ephemeral(
       "✅ Corrected <@" + userId + "> to **" + action + "**." +
-        (result.warning ? "\n⚠️ " + result.warning : ""),
+        (correctionWarning ? "\n⚠️ " + correctionWarning : "") +
+        automationText,
     );
   }
   if (invocation.subcommand === "plan") {
@@ -520,20 +866,75 @@ async function handleWeekCommand(
   if (invocation.subcommand === "publish") {
     const result = await week.publishPlan(guildId, actorUserId);
     let roleText = "";
-    try {
-      roleText = "\n" + formatRoleReport(await roles.sync(guildId));
-    } catch (error) {
-      roleText =
-        "\n⚠️ Tables published, but GM role sync needs repair: " +
-        (error instanceof Error ? error.message : String(error));
+    const config = await repository.getGuildConfig(guildId);
+    if (config?.roleSyncEnabled) {
+      try {
+        roleText = "\n" + formatRoleReport(await roles.sync(guildId));
+      } catch (error) {
+        roleText =
+          "\n⚠️ Tables published, but GM role sync needs repair: " +
+          (error instanceof Error ? error.message : String(error));
+      }
     }
     return ephemeral(
       "✅ Published " +
         result.bundle.tables.length +
         " tables." +
         (result.links.length ? "\n" + result.links.join("\n") : "") +
-        roleText,
+      roleText,
     );
+  }
+  if (invocation.subcommand === "export") {
+    const attachFiles = diagnoseInteractionPermissions(interaction.app_permissions).find(
+      (check) => check.name === "Attach Files",
+    );
+    if (attachFiles?.level !== "pass") {
+      throw new UserFacingError(
+        "This channel does not grant the bot Attach Files. Allow that permission, then retry the export.",
+      );
+    }
+    try {
+      const snapshot = await week.exportSnapshot(
+        guildId,
+        stringOption(invocation, "event_id"),
+      );
+      const exported = generateWeeklyRosterCsv(snapshot);
+      return ephemeralAttachment(
+        "✅ Private roster snapshot ready: **" + exported.filename + "** (" + exported.rowCount + " rows).",
+        {
+          filename: exported.filename,
+          contentType: exported.contentType,
+          content: exported.text,
+          audit: {
+            guildId,
+            eventId: snapshot.event.eventId,
+            actorUserId,
+            details: {
+              schemaVersion: exported.schemaVersion,
+              rowCount: exported.rowCount,
+              byteLength: exported.byteLength,
+              filename: exported.filename,
+              planId: snapshot.planBundle?.plan.planId ?? null,
+              planGeneration: snapshot.planBundle?.plan.generation ?? null,
+              planStatus: snapshot.planBundle?.plan.status ?? null,
+            },
+          },
+        },
+      );
+    } catch (error) {
+      if (error instanceof WeeklyExportLimitError) {
+        throw new UserFacingError(
+          "The roster is too large for a safe Discord attachment (" +
+            error.actual +
+            " " +
+            error.limit +
+            "; limit " +
+            error.maximum +
+            ").",
+        );
+      }
+      throw error;
+    }
   }
   if (invocation.subcommand === "archive") {
     await week.archiveWeek(guildId, actorUserId);
@@ -561,8 +962,18 @@ async function handleWeekCommand(
   if (invocation.subcommand === "retry") {
     const step = stringOption(invocation, "step");
     if (step === "publish") {
-      const result = await week.retryPublish(guildId, actorUserId);
-      return ephemeral("✅ Publication retry completed for " + result.bundle.tables.length + " tables.");
+      const event = await repository.getCurrentWeeklyEvent(guildId);
+      if (!event) throw new UserFacingError("There is no active week.");
+      const outcome = await runSchedulerRecovery(
+        repository,
+        event,
+        "publish",
+        actorUserId,
+        async () => {
+          await week.publishPlan(guildId, actorUserId, true, event.eventId);
+        },
+      );
+      return ephemeral("✅ Table publication step is " + outcome + ".");
     }
     if (step === "open") {
       const event = await repository.getCurrentWeeklyEvent(guildId);
@@ -606,7 +1017,45 @@ async function handleWeekCommand(
       );
     }
     if (step === "roles") {
-      return ephemeral(formatRoleReport(await roles.sync(guildId)));
+      const event = await repository.getCurrentWeeklyEvent(guildId);
+      if (!event) throw new UserFacingError("There is no active week.");
+      const plan = await repository.getCurrentPlan(event.eventId);
+      if (!plan || plan.status !== "published") {
+        throw new UserFacingError("The week has no authoritative published plan.");
+      }
+      let report = "";
+      const outcome = await runSchedulerRecovery(
+        repository,
+        event,
+        "roles",
+        actorUserId,
+        async () => {
+          const roleReport = await roles.sync(guildId);
+          report = formatRoleReport(roleReport);
+          requireSuccessfulRoleReconciliation(roleReport);
+        },
+        event.eventId + ":" + plan.planId,
+      );
+      return ephemeral("✅ GM role reconciliation is " + outcome + "." + (report ? "\n" + report : ""));
+    }
+    if (step === "finalize") {
+      const event = await repository.getCurrentWeeklyEvent(guildId);
+      if (!event) throw new UserFacingError("There is no active week.");
+      const plan = await repository.getCurrentPlan(event.eventId);
+      if (!plan || plan.status !== "published") {
+        throw new UserFacingError("The week has no authoritative published plan.");
+      }
+      const outcome = await runSchedulerRecovery(
+        repository,
+        event,
+        "finalize",
+        actorUserId,
+        async () => {
+          await week.finalizeTables(guildId, event.eventId);
+        },
+        event.eventId + ":" + plan.planId + ":" + event.tableStateVersion,
+      );
+      return ephemeral("✅ Final table manifest step is " + outcome + ".");
     }
     throw new UserFacingError("Choose a valid retry step.");
   }
@@ -644,16 +1093,30 @@ async function handleWeekCommand(
         ? "open"
         : step === "lock"
           ? "lock-plan"
+          : step === "publish"
+            ? "publish"
+            : step === "finalize"
+              ? "finalize"
           : step === "archive"
             ? "archive"
             : null;
     if (!action) throw new UserFacingError("Choose a valid scheduled step.");
+    let operationEntityId = event.eventId;
+    if (action === "finalize") {
+      const plan = await repository.getCurrentPlan(event.eventId);
+      if (!plan || plan.status !== "published") {
+        throw new UserFacingError("The week has no authoritative published plan.");
+      }
+      operationEntityId =
+        event.eventId + ":" + plan.planId + ":" + event.tableStateVersion;
+    }
     const result = await skipSchedulerStep(
       repository,
       event,
       action,
       actorUserId,
       reason,
+      operationEntityId,
     );
     return ephemeral("⏭️ Scheduled " + action + " step is " + result + ".");
   }
@@ -833,7 +1296,7 @@ async function handleComponent(
         result.payload,
       );
     }
-    return updateMessage({ ...result.payload });
+    return ephemeral("✅ " + result.message);
   }
 
   const result = await week.selectTable({
@@ -843,7 +1306,7 @@ async function handleComponent(
     userId,
     action: component.action,
   });
-  return updateMessage({ ...result.payload });
+  return ephemeral("✅ " + result.message);
 }
 
 async function executeDiscordInteraction(
@@ -898,16 +1361,45 @@ async function finishDeferredInteraction(
   const body = (await response.json()) as {
     type?: number;
     data?: Record<string, unknown>;
+    attachment?: InternalAttachmentResponse;
   };
   if (interaction.type === InteractionType.ApplicationCommand) {
     const { flags: _initialOnlyFlags, ...messageData } = body.data ?? {
       content: "The command completed without a response body.",
     };
-    await discord.editOriginalInteractionResponse(
-      applicationId,
-      token,
-      messageData as never,
-    );
+    if (body.attachment) {
+      const { audit: _audit, ...file } = body.attachment;
+      try {
+        await discord.editOriginalInteractionResponseWithFile(
+          applicationId,
+          token,
+          messageData as DiscordMessagePayload,
+          file,
+        );
+        await recordAttachmentDelivery(env, body.attachment, "succeeded");
+      } catch (error) {
+        await recordAttachmentDelivery(env, body.attachment, "failed", error);
+        console.error(
+          JSON.stringify({
+            kind: "guild-assistant.attachment-delivery-error",
+            interactionId: interaction.id,
+            eventId: body.attachment.audit?.eventId,
+            errorKind: error instanceof Error ? error.name : typeof error,
+          }),
+        );
+        await discord.editOriginalInteractionResponse(applicationId, token, {
+          content:
+            "⚠️ The roster was generated, but Discord did not receive the file. Check Attach Files and run /week export again.",
+          allowed_mentions: safeAllowedMentions(),
+        });
+      }
+    } else {
+      await discord.editOriginalInteractionResponse(
+        applicationId,
+        token,
+        messageData as DiscordMessagePayload,
+      );
+    }
     return;
   }
   if (body.type === InteractionResponseType.ChannelMessageWithSource && body.data) {
@@ -966,10 +1458,21 @@ export async function handleScheduled(env: Env, now = Date.now()): Promise<void>
         await week.lockWeek(event.guildId, undefined, event.eventId);
         await week.generatePlan(event.guildId, undefined, event.eventId);
       },
+      publishEvent: async (event) => {
+        await week.publishPlan(event.guildId, undefined, true, event.eventId);
+      },
+      syncRoles: async (event) => {
+        requireSuccessfulRoleReconciliation(await roles.sync(event.guildId));
+      },
+      finalizeEvent: async (event) => {
+        await week.finalizeTables(event.guildId, event.eventId);
+      },
       archiveEvent: async (event) => {
         await week.archiveWeek(event.guildId, undefined, event.eventId);
         const config = await repository.getGuildConfig(event.guildId);
-        if (config?.roleSyncEnabled) await roles.sync(event.guildId);
+        if (config?.roleSyncEnabled) {
+          requireSuccessfulRoleReconciliation(await roles.sync(event.guildId));
+        }
       },
       enqueueEventReminders: async (event) => {
         await reminders.enqueuePreLockReminder(event);

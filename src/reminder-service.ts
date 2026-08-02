@@ -37,7 +37,10 @@ export type ReminderRepository = Pick<
   | "countActiveSignups"
 >;
 
-export type ReminderDiscordClient = Pick<DiscordRestClient, "sendChannelMessage">;
+export type ReminderDiscordClient = Pick<
+  DiscordRestClient,
+  "getGuildRoles" | "sendChannelMessage"
+>;
 
 export interface ReminderLogEntry {
   readonly component: "reminder";
@@ -382,10 +385,24 @@ export class ReminderService {
         counts,
         config.tableMaxSize ?? config.maxPlayersPerTable ?? 6,
       );
-      const roleIds = [
-        ...this.#configuredRoleIds(rule, delivery),
-        ...(capacity.atRisk && config.adminRoleId ? [config.adminRoleId] : []),
-      ];
+      const roleIds = this.#configuredRoleIds(rule, delivery);
+      if (capacity.atRisk && config.adminRoleId) {
+        assertSnowflake(config.adminRoleId, "adminRoleId");
+        const escalationRole = (await this.discord.getGuildRoles(event.guildId)).find(
+          (role) => role.id === config.adminRoleId,
+        );
+        if (!escalationRole) {
+          throw new ReminderConfigurationError(
+            "The organizer escalation role no longer exists. Update admin_role in /guild setup, then retry the reminder.",
+          );
+        }
+        if (!escalationRole.mentionable) {
+          throw new ReminderConfigurationError(
+            "The organizer escalation role is not mentionable. Enable “Allow anyone to @mention this role”, then retry the reminder.",
+          );
+        }
+        roleIds.push(config.adminRoleId);
+      }
       for (const roleId of roleIds) assertSnowflake(roleId, "roleId");
       const rendered = this.#renderBody(delivery.content, event, config, counts);
       const payload = renderReminderMessage({
