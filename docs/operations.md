@@ -67,7 +67,7 @@ Discord supplies the option form after a subcommand is selected.
 | `/week skip` | Confirm an audited skip of one `open`, `lock`, `remind`, `publish`, `finalize`, or `archive` occurrence. |
 | `/week cancel` | Explicitly cancel a week that should not continue; requires an audit reason. |
 | `/roles sync` | Preview with `dry_run: true`; apply the same desired-vs-leased reconciliation with `dry_run: false`. |
-| `/reminder configure` | Validate and show an ephemeral preview of channel, schedule, roles, and rendered text. Set `enabled: false` to disable/skip future occurrences. |
+| `/reminder configure` | Save the rule and show a private rendered confirmation; it does not send immediately. Set `enabled: false` to disable future occurrences. |
 | `/reminder send` | Send an authorized reminder now. Intentional resend requires the explicit resend/confirmation option. |
 | `/session status`, `attendance`, `confirm` | Privately review actual attendance, record deviations, and confirm/correct an archived table outcome. |
 | `/priority status`, `use`, `release` | Privately inspect, explicitly reserve, or release the invoking member's token. |
@@ -75,7 +75,8 @@ Discord supplies the option form after a subcommand is selected.
 | `/priority-admin correct`, `refund` | Append a confirmed, reasoned grant correction or exceptional token refund. |
 | `/priority-admin configure` | Set this guild's pre-expiration DM lead; `0` disables it. |
 
-Configure is the reminder preview. `/week skip` skips one persisted occurrence;
+The configuration response confirms the rule that was just saved; rerun the
+command or disable the rule if it is wrong. `/week skip` skips one persisted occurrence;
 `enabled: false` pauses creation of future reminder occurrences. An ordinary
 retry is not an intentional resend and must not create a second successful
 message.
@@ -84,24 +85,113 @@ The [DM priority operations runbook](dm-priority-operations.md) is the
 authoritative organizer path for post-game confirmation, displacement disputes,
 blocked/uncertain DMs, correction, and the required live test-guild pilot.
 
-## First-time activation
+## Installation, activation, and upgrades
 
-1. Apply D1 migrations to the intended database and deploy the Worker with its D1 binding and Cron Trigger.
-2. Configure the Discord interaction endpoint and install the bot in a non-production/test guild first.
-3. Run `/guild setup` without options to see the resumable setup dashboard. Save the event channel first, then update only settings that differ from the safe defaults. Setup starts in paused mode. Use an IANA time zone such as `America/Denver`, not a fixed UTC offset, so daylight-saving changes are handled.
-4. Run `/guild status`, then `/guild doctor`. Resolve every required failure before enabling scheduling. Warnings for unused optional features are acceptable.
-5. If reminders are wanted, configure them and confirm the ephemeral preview contains the intended channel and only explicitly configured role mentions. Templates containing `@everyone`, `@here`, or an unapproved dynamic mention must be rejected.
-6. If role sync is wanted, run `/roles sync dry_run: true`. Verify that the bot role is above the managed role and that only expected Guild Assistant leases would change.
-7. Select review mode with `/guild automation mode:review confirm:true`, enabling reminders or role sync only when their checks pass.
-8. Run one complete synthetic week from open through archive. In review mode the scheduler stops at the planned revision until an admin runs `/week publish`; finalization and archive resume automatically afterward. `test/fixtures/sanitized-week.json` is safe representative data; never copy production member lists into an issue or test.
-9. After the synthetic cycle and duplicate/retry checks succeed, remain in review mode or explicitly select autopilot with `/guild automation mode:autopilot confirm:true`.
+This is the day-two operations runbook. Do not start here if the bot has never
+responded in Discord.
+
+For a first installation, follow these guides in order:
+
+1. [First deployment: Discord and Cloudflare](first-deployment.md) — create or
+   verify the Discord application, D1 database, Worker, endpoint, installation,
+   and test-guild commands.
+2. [Configure a Discord guild](guild-setup.md) — save the channel, schedule,
+   table policy, optional roles, and reminders while automation remains Paused.
+3. [Test-guild go-live pilot](test-guild-pilot.md) — prove the deployed workflow
+   before using Autopilot or a real guild.
+4. [Promote the tested bot to the real guild](real-guild-go-live.md) — install,
+   register, configure, and begin the real guild in Review mode.
+
+### Deploy an update to an existing Worker
+
+Merging a pull request changes GitHub only. It does not migrate D1 or deploy
+Cloudflare. The release manager must deploy a specific reviewed commit. A team
+may test a release branch before merge or deploy `main` after merge; in either
+case, record the exact commit:
+
+```powershell
+Set-Location C:\git\DnD-GuildAssistant
+git status --short
+git rev-parse HEAD
+npm ci
+npm run check
+npx wrangler deploy --dry-run
+npx wrangler whoami
+npx wrangler d1 list
+```
+
+Stop if the worktree is unexpectedly dirty, tests fail, or Wrangler is logged
+into the wrong Cloudflare account. In the D1 list, require the database name and
+UUID to match `wrangler.jsonc` exactly.
+
+Schedule a short maintenance window before the backup:
+
+1. record every installed guild's current mode with `/guild status`;
+2. pause each guild with `/guild automation mode:Paused confirm:True`; and
+3. tell admins that Discord commands may fail temporarily.
+
+A remote D1 export makes the database unavailable for queries while it runs.
+Keep the maintenance window open through backup, migrations, deployment, and
+the post-deploy checks.
+
+For a non-empty database, export a backup outside the repository:
+
+```powershell
+New-Item -ItemType Directory -Force C:\tmp
+$guildBackupStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$guildBackupPath = "C:\tmp\dnd-guild-assistant-$guildBackupStamp.sql"
+npx wrangler d1 export DB --remote --output $guildBackupPath
+if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $guildBackupPath) -or (Get-Item -LiteralPath $guildBackupPath).Length -eq 0) { throw "D1 backup failed; stop the deployment." }
+```
+
+Ask D1 which numbered migrations are pending; do not infer the answer from a PR
+description:
+
+```powershell
+npx wrangler d1 migrations list DB --remote
+npm run db:migrate:remote
+npx wrangler d1 migrations list DB --remote
+```
+
+The final list must report no pending migrations. Then deploy the
+compatible Worker:
+
+```powershell
+npm run deploy
+```
+
+`wrangler.jsonc` applies the `DB` binding and 15-minute Cron Trigger during
+deployment. Open the reported Worker URL and confirm it returns
+`status: ready`.
+
+Register guild-scoped commands only after D1 and the compatible Worker are
+deployed. For a commit on `main`, use **Actions → Register Discord commands →
+Run workflow** from `main`; enter each target Server ID as `target_guild_id`,
+paste the full deployed commit SHA into `deployed_ref`, and confirm deployment.
+The workflow fails closed if the Application ID variable is missing or the SHA
+is not on trusted `main` history.
+
+For an unmerged test deployment, run `npm run commands:register` from the exact
+deployed checkout with a complete local `.dev.vars`. Use `DISCORD_GUILD_ID` to
+override the file's test Server ID when deliberately targeting another guild.
+
+Finish the release in Discord:
+
+1. run `/ping`;
+2. run `/guild status` and `/guild doctor`;
+3. resolve every failure for enabled features; and
+4. restore each guild's recorded Review or Autopilot mode only after its checks
+   pass. Keep a failing guild Paused.
+
+If command definitions did not change and the commands already appear, do not
+register them again merely because Worker code was deployed.
 
 ## Automation modes
 
 | Mode | Scheduled behavior | Intended use |
 | --- | --- | --- |
 | Paused | Scheduled lifecycle transitions are disabled and role sync is forced off. Admin lifecycle commands remain available. | Initial setup, maintenance, or incident containment. |
-| Review | The scheduler creates/opens, reminds, locks, and plans. An admin reviews and publishes; selection finalization and archive then continue automatically. | Human approval before tables become member-facing. |
+| Review | The scheduler creates/opens, sends any enabled reminder, locks, and plans. An admin reviews and publishes; selection finalization and archive then continue automatically. | Human approval before tables become member-facing. |
 | Autopilot | The scheduler creates/opens, reminds when configured, locks, plans, publishes, finalizes at game time, reconciles optional roles, and archives after the event. | Normal zero-touch operation after a successful pilot. |
 
 Changing away from paused mode requires explicit confirmation and a passing
@@ -216,7 +306,12 @@ An archived week should not be reopened by database editing. If correction is es
 
 - Take a D1 export before destructive repair, retention purge, or migration. Test restore against a non-production database.
 - Deploy migrations and Worker code from the organization repository. Verify typecheck/tests, migration status, command registration, health, and `/guild doctor`.
-- Configure a GitHub environment named `discord-command-registration` with required maintainer review and store `DISCORD_BOT_TOKEN` as its environment secret. The command-registration workflow cannot access that token until the environment protection rules pass.
+- The manual command-registration workflow needs a GitHub Actions secret named
+  `DISCORD_BOT_TOKEN`. Store it in the `discord-command-registration`
+  environment, restrict that environment to `main`, and configure required
+  reviewers when another maintainer is available. Remove a repository-level
+  copy after the environment secret works so untrusted branch workflows cannot
+  read it.
 - Rotate a compromised Discord token immediately in the Developer Portal, update Cloudflare/GitHub secrets, redeploy if required, and invalidate any local copy. Never paste the old/new token into logs or issues.
 - A public-key rotation requires updating the Discord application and Cloudflare secret together; test endpoint validation afterward.
 - Maintain at least two owners for the Discord app, Cloudflare account, GitHub organization, and recovery-factor storage.

@@ -19,12 +19,12 @@ export const commands = [
       {
         type: 1,
         name: "setup",
-        description: "Show setup guidance or update only the settings you provide.",
+        description: "Show the setup dashboard or change only the settings you provide.",
         options: [
           {
             type: 7,
             name: "channel",
-            description: "Required once: channel for signup, table, and reminder posts.",
+            description: "Required once: channel for signup, tables, and built-in reminders.",
             channel_types: channelTypes,
           },
           {
@@ -76,7 +76,7 @@ export const commands = [
           {
             type: 4,
             name: "preferred",
-            description: "Planner target before opening another table; recommended 6.",
+            description: "Desired players per table and plan-health target; recommended 6.",
             min_value: 1,
             max_value: 20,
           },
@@ -378,7 +378,8 @@ export const commands = [
           {
             type: 5,
             name: "dry_run",
-            description: "Preview changes without modifying Discord roles.",
+            description: "True previews; False applies role changes. Choose explicitly.",
+            required: true,
           },
         ],
       },

@@ -4,17 +4,19 @@ This runbook covers the M6 reward and priority-seat workflow. D1 is
 authoritative; Discord messages are private projections of its append-only
 completion, token, seating, and notification records.
 
-## Deployment order
+## Before using this runbook
 
-1. Back up the target D1 database.
-2. Apply migrations `0006_session_completions.sql`,
-   `0007_priority_seating.sql`, and `0008_priority_notifications.sql`.
-3. Deploy the Worker.
-4. Replace the test-guild command definitions with
-   `npm run commands:register`.
-5. Run `/guild doctor`, then follow the
-   [test-guild pilot](test-guild-pilot.md). Do not enable a real-guild week
-   until that live click-through is recorded.
+This is a feature-operations guide, not a deployment checklist. Complete the
+[first deployment](first-deployment.md) or the update procedure in the
+[operations guide](operations.md#deploy-an-update-to-an-existing-worker) first.
+
+Before testing DM rewards, verify that the remote migration list is empty, the
+compatible Worker is deployed, `/ping` responds, and `/guild doctor` has no
+required failures. Then follow the
+[test-guild pilot](test-guild-pilot.md). Do not enable a real-guild week until
+that live click-through is recorded. Permanent runbooks intentionally do not
+name a fixed migration set; Wrangler reports the files pending for each D1
+database.
 
 The 15-minute Cron Trigger reconciles incomplete reward grants, expires due
 tokens, repairs notification outbox entries, and delivers private DMs. Those

@@ -16,12 +16,39 @@ or long-running gateway process must stay online.
 Live health endpoint:
 <https://dnd-new-dawn-guild-assistant.dnd-new-dawn-guild-assistant.workers.dev>
 
+## Start here
+
+Choose the guide that matches what you are trying to do:
+
+| Goal | Start with |
+| --- | --- |
+| Create/connect the Discord application, Cloudflare Worker, and D1 database | [First deployment: Discord and Cloudflare](docs/first-deployment.md) |
+| The bot responds to `/ping`; configure a Discord server | [Configure a Discord guild](docs/guild-setup.md) |
+| Validate a deployed release in a disposable server | [Test-guild go-live pilot](docs/test-guild-pilot.md) |
+| The pilot passed; activate the real guild | [Promote the tested bot to the real guild](docs/real-guild-go-live.md) |
+| Operate, recover, back up, or hand off an existing deployment | [Operations guide](docs/operations.md) |
+| Change the code locally | [Contributing guide](CONTRIBUTING.md) and **Local development** below |
+
+The shortest safe Discord-admin path, after deployment, is:
+
+1. Run `/ping`.
+2. Run `/guild setup channel:#guild-assistant-test`.
+3. Run `/guild setup` again and confirm the time zone, weekly schedule, signup
+   window, and table sizes.
+4. Run `/guild status`, then `/guild doctor`; fix every ❌.
+5. Leave automation Paused and complete the disposable-server pilot. The pilot
+   turns on Review and Autopilot at controlled points.
+6. After a PASS, follow the separate real-guild promotion guide.
+
+The [guild setup guide](docs/guild-setup.md) explains every `/guild setup`
+option, default, optional role, permission, and expected result.
+
 ## Functional MVP
 
 The native weekly workflow is implemented end to end:
 
 - Guided, resumable per-server Discord setup, sanitized status, and actionable
-  doctor commands. Safe defaults let an admin configure one setting at a time.
+  doctor commands. Starting values can be reviewed and changed one setting at a time.
 - Time-zone-aware weekly event creation across daylight-saving changes.
 - Explicit draft, open, locked, planned, published, archived, and cancelled
   lifecycle state with audited, idempotent transitions.
@@ -94,11 +121,11 @@ Admin commands require Manage Server and return private responses.
 | <code>/week cancel</code> | Cancel an unfinished/published week with an audit reason. |
 | <code>/week archive</code> | Close the week and reconcile assistant-owned roles. |
 | <code>/roles sync</code> | Preview or apply weekly GM role reconciliation. |
-| <code>/reminder configure</code> | Preview and enable/disable the pre-lock reminder. |
+| <code>/reminder configure</code> | Save or disable the pre-lock rule and show a private rendered confirmation. |
 | <code>/reminder send</code> | Send once now or explicitly request an intentional resend. |
 | <code>/session status</code> / <code>attendance</code> / <code>confirm</code> | Privately record actual archived-table outcomes and reconcile the DM reward. |
 | <code>/priority status</code> / <code>use</code> / <code>release</code> | Privately view, explicitly confirm, or release a member's DM priority token. |
-| <code>/priority-admin diagnose</code> | Return an aliased, sanitized reward/seating/notification trace. |
+| <code>/priority-admin diagnose</code> | Return a sanitized private trace plus admin-only correction/refund references. |
 | <code>/priority-admin correct</code> / <code>refund</code> | Append an authorized, reasoned reward correction or exceptional token refund. |
 | <code>/priority-admin configure</code> | Configure or disable the private pre-expiration reminder. |
 
@@ -118,76 +145,69 @@ Grant only:
 - Attach Files in a channel only when admins will invoke <code>/week export</code>
 
 Do not grant Administrator. Put the bot's integration role above the normal
-weekly GM role. If reminders must notify a role, make that role mentionable or
-grant the narrow Discord permission that allows the bot to mention it.
+weekly GM role. If reminders must notify a role, enable **Allow anyone to
+@mention this role** for that configured role.
 
 The bot constructs <code>allowed_mentions</code> explicitly. It never enables
 <code>@everyone</code>, <code>@here</code>, arbitrary users, or undeclared roles.
 
-## Quick start
+## Local development
 
-Requirements: Node.js 22 or newer, npm, a Cloudflare account, and a Discord
-application installed in a test server.
+Local development is not Discord installation: Discord cannot call localhost
+without a public tunnel. Use it for tests, local D1, and implementation work.
 
-1. Install dependencies:
+Requirements: Node.js 22 or newer and npm.
 
-       npm install
+```powershell
+npm install
+Copy-Item .dev.vars.example .dev.vars
+npm run db:migrate:local
+npm run dev
+```
 
-2. Copy the local environment template:
+Fill `.dev.vars` with the Discord application ID, test Server ID, public key,
+and bot token. Never commit that file or paste its token into logs or issues.
+For a real Discord endpoint, follow the first-deployment guide and deploy the
+Worker.
 
-       Copy-Item .dev.vars.example .dev.vars
+## Runtime configuration
 
-3. Fill in the Discord application ID, test guild ID, public key, and bot token.
-   Never commit <code>.dev.vars</code> or paste its token into logs/issues.
+| Variable or binding | Sensitive? | Deployed Worker location | Command-registration location |
+| --- | --- | --- | --- |
+| <code>DB</code> | No | D1 binding in <code>wrangler.jsonc</code> | Not used |
+| <code>DISCORD_APPLICATION_ID</code> | No | Worker variable in <code>wrangler.jsonc</code> | Required GitHub environment/repository variable, or local <code>.dev.vars</code> |
+| <code>DISCORD_TEST_GUILD_ID</code> | No | Not used by the runtime | Default local registration target in <code>.dev.vars</code> |
+| <code>DISCORD_GUILD_ID</code> | No | Not used by the runtime | GitHub workflow input or one-command local override for the target guild |
+| <code>DISCORD_PUBLIC_KEY</code> | No, but integrity-critical | Cloudflare Worker secret | Not used |
+| <code>DISCORD_BOT_TOKEN</code> | **Yes** | Cloudflare Worker secret | Protected GitHub environment secret, or local <code>.dev.vars</code> |
 
-4. Apply the local D1 migration:
+The Cloudflare secret store, GitHub Actions secret store, and local
+`.dev.vars` file are independent. Saving a value in one does not populate the
+others. Configure every column used by your chosen runtime and registration
+path.
 
-       npm run db:migrate:local
+## Release deployment summary
 
-5. Start the Worker:
+Do not begin with “merge the PR” or guess migration filenames. From the exact
+reviewed commit you intend to deploy:
 
-       npm run dev
+1. Record the commit, run `npm run check`, and run a Wrangler deploy dry run.
+2. Verify the Cloudflare account and exact D1 name/UUID.
+3. Back up a non-empty D1 database outside the repository.
+4. Ask `npx wrangler d1 migrations list DB --remote` which migrations are
+   pending, then apply that reported set.
+5. Deploy the same reviewed commit and verify the Worker health URL.
+6. Register commands from the exact deployed commit, verify the Discord
+   interaction endpoint, then run `/ping` and
+   `/guild doctor`.
 
-Discord cannot call localhost directly. Local mode is useful for health,
-migration, and automated testing; deploy for Discord endpoint validation.
-
-## Configuration
-
-| Variable or binding | Secret | Purpose |
-| --- | --- | --- |
-| <code>DB</code> | No | D1 binding for all tenant-scoped workflow state. |
-| <code>DISCORD_APPLICATION_ID</code> | No | Discord application and command registration. |
-| <code>DISCORD_TEST_GUILD_ID</code> | No | Immediate guild-scoped command registration. |
-| <code>DISCORD_PUBLIC_KEY</code> | No | Ed25519 verification for every interaction. |
-| <code>DISCORD_BOT_TOKEN</code> | **Yes** | Discord REST publication, role, reminder, and registration calls. |
-
-Discord snowflakes and the application public key are public identifiers, not
-credentials. The bot token and Cloudflare credentials are secrets.
-
-## Deploy
-
-Authenticate Wrangler, create a D1 database once, place its database ID in
-<code>wrangler.jsonc</code>, then:
-
-    npx wrangler secret put DISCORD_PUBLIC_KEY
-    npx wrangler secret put DISCORD_BOT_TOKEN
-    npm run db:migrate:remote
-    npm run check
-    npm run deploy
-    npm run commands:register
-
-Set the deployed Worker URL as the Discord application's Interactions Endpoint
-URL. In the test server, run <code>/guild setup</code> with no options to see the
-guided dashboard, then save the event channel and any settings that differ from
-the safe defaults. Run <code>/guild doctor</code> and resolve every required
-failure before a real weekly cycle. Setup starts in paused mode. After a
-synthetic cycle, explicitly select review or autopilot with
-<code>/guild automation</code>; role sync and reminders remain independently
-optional.
-
-The checked-in Cron Trigger runs every 15 minutes. Per-guild local schedule and
-time zone live in D1; repeated Cloudflare deliveries use conditional writes,
-stable operation keys, and Discord nonces.
+This is only an orientation. The authoritative commands, secret branches,
+Discord Portal screens, and checkpoints are in [First deployment](docs/first-deployment.md)
+for a brand-new environment and [Operations](docs/operations.md#deploy-an-update-to-an-existing-worker)
+for an existing Worker update. The
+checked-in `wrangler.jsonc` deploys the D1 binding and a 15-minute Cron Trigger.
+Per-guild local schedule and time zone live in D1; repeated Cloudflare
+deliveries use conditional writes, stable operation keys, and Discord nonces.
 
 ## Development commands
 
@@ -201,7 +221,7 @@ stable operation keys, and Discord nonces.
 | <code>npm run db:migrate:remote</code> | Apply pending migrations to remote D1. |
 | <code>npm run dev</code> | Run the Worker locally. |
 | <code>npm run deploy</code> | Deploy Worker code, bindings, and Cron Trigger. |
-| <code>npm run commands:register</code> | Replace test-guild command definitions. |
+| <code>npm run commands:register</code> | Replace guild-scoped commands for the explicit/local target guild. |
 
 ## Project layout
 
