@@ -96,6 +96,8 @@ function signup(
     userId,
     displayName: userId,
     signupKind: kind,
+    gameTier: 1,
+    gmCommitment: kind === "gm" ? "primary" : null,
     status: "active",
     source: "native",
     sourceExternalId: null,
@@ -138,6 +140,7 @@ function assignment(
     desiredTableId: null,
     userId,
     displayName: userId,
+    gameTier: 1,
     status,
     waitlistPosition: null,
     assignedAt: null,
@@ -154,6 +157,7 @@ function planBundle(plan = draftPlan()): PlanBundle {
         tableId: "table-1",
         planId: plan.planId,
         tableNumber: 1,
+        gameTier: 1,
         title: "Table 1",
         capacity: 1,
         gmUserId: "gm-1",
@@ -166,6 +170,7 @@ function planBundle(plan = draftPlan()): PlanBundle {
         tableId: "table-2",
         planId: plan.planId,
         tableNumber: 2,
+        gameTier: 1,
         title: "Table 2",
         capacity: 1,
         gmUserId: "gm-2",
@@ -364,6 +369,8 @@ class FakeRepository {
       userId: input.userId,
       displayName: input.displayName,
       signupKind: input.signupKind,
+      gameTier: input.gameTier ?? null,
+      gmCommitment: input.gmCommitment ?? null,
       status: "active",
       source: input.source ?? "native",
       sourceExternalId: input.sourceExternalId ?? null,
@@ -393,6 +400,9 @@ class FakeRepository {
     return {
       players: active.filter((item) => item.signupKind === "player").length,
       gms: active.filter((item) => item.signupKind === "gm").length,
+      gmBackups: active.filter(
+        (item) => item.signupKind === "gm" && item.gmCommitment === "backup",
+      ).length,
     };
   }
 
@@ -524,11 +534,13 @@ class FakeRepository {
         assignmentId: input.assignmentId,
         planId: input.planId,
         displayName: input.displayName,
+        gameTier: this.signups.get(input.userId)?.gameTier ?? 1,
       });
       bundle.assignments.push(current);
     } else if (current.status === "withdrawn") {
       Object.assign(current, {
         displayName: input.displayName,
+        gameTier: this.signups.get(input.userId)?.gameTier ?? current.gameTier,
         status: "unassigned",
         tableId: null,
         desiredTableId: null,
@@ -836,7 +848,7 @@ describe("WeekService", () => {
     expect(discord.sends[0]?.channelId).toBe("gm-sign-up-channel");
     expect(discord.sends[0]?.payload.components?.[0]?.components.map(
       (button) => button.label,
-    )).toEqual(["Run a Game", "Withdraw"]);
+    )).toEqual(["Run T1", "Run T2", "Run T3", "Backup GM", "Withdraw"]);
     expect(discord.sends[0]?.payload.allowed_mentions).toEqual({
       parse: [], roles: [], users: [], replied_user: false,
     });
@@ -854,10 +866,14 @@ describe("WeekService", () => {
     expect(discord.sends[1]?.channelId).toBe("events-channel");
     expect(discord.sends[1]?.payload.components?.[0]?.components.map(
       (button) => button.label,
-    )).toEqual(["Play", "Withdraw"]);
+    )).toEqual(["Play T1", "Play T2", "Play T3", "Withdraw"]);
     expect(discord.sends[1]?.payload.embeds?.[0]?.fields?.map(
       (field) => field.name,
-    )).toEqual(["Players (0)"]);
+    )).toEqual([
+      "Tier 1 · Levels 3–4",
+      "Tier 2 · Levels 5–7",
+      "Tier 3 · Levels 8+",
+    ]);
     expect(repository.event).toMatchObject({
       signupChannelId: "events-channel",
       signupMessageId: "message-2",
@@ -891,7 +907,7 @@ describe("WeekService", () => {
       action: "withdraw",
     });
 
-    expect(switched.message).toBe("Signed up to play.");
+    expect(switched.message).toBe("Signed up to play Tier 1 · Levels 3–4.");
     expect(repository.signups.get("player-1")?.signupKind).toBe("player");
     expect(repository.signups.get("player-1")?.status).toBe("withdrawn");
     expect(withdrawn.message).toBe("You dropped from this week's games.");
@@ -962,7 +978,7 @@ describe("WeekService", () => {
       action: "player",
     });
 
-    expect(result.message).toContain("global waitlist");
+    expect(result.message).toContain("Tier 1");
     expect(repository.ensureAssignmentCalls).toHaveLength(1);
     expect(repository.signups.get("late-player")).toMatchObject({
       signupKind: "player",
@@ -1052,6 +1068,27 @@ describe("WeekService", () => {
       expect(corrected.requiresReplan).toBe(true);
     },
   );
+
+  it("marks a planned draft stale after a player correction", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("planned");
+
+    const corrected = await service(repository, new FakeDiscord()).correctSignup({
+      guildId: "synthetic-guild",
+      actorUserId: "admin-1",
+      userId: "late-player",
+      displayName: "Late Player",
+      action: "player",
+      gameTier: 2,
+    });
+
+    expect(corrected.requiresReplan).toBe(true);
+    expect(corrected.warning).toContain("Run /week plan");
+    expect(repository.signups.get("late-player")).toMatchObject({
+      signupKind: "player",
+      gameTier: 2,
+    });
+  });
 
   it("withdraws after cutoff, promotes, and keeps refreshed table cards closed", async () => {
     const repository = new FakeRepository();
@@ -1219,9 +1256,109 @@ describe("WeekService", () => {
       ),
     );
     expect(JSON.stringify(generated.preview)).toContain(
-      "2 players are on the global waitlist in signup order",
+      "2 players are on tier waitlists in signup order",
     );
     expect(generated.event.status).toBe("planned");
+  });
+
+  it("moves a published player reservation when the player changes tiers", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("published");
+    repository.signups.set("moving-player", signup("moving-player", "player"));
+    const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
+    bundle.tables[1].gameTier = 2;
+    bundle.assignments.push(
+      assignment("moving-player", "assigned", {
+        tableId: "table-1",
+        desiredTableId: "table-1",
+      }),
+    );
+    repository.bundles.set("plan-1", bundle);
+
+    const result = await service(repository, new FakeDiscord(), ["unused"]).changeSignup({
+      guildId: "synthetic-guild",
+      eventId: "event-1",
+      userId: "moving-player",
+      displayName: "Moving Player",
+      action: "player",
+      gameTier: 2,
+    });
+
+    expect(repository.withdrawAssignmentCalls).toEqual([
+      { planId: "plan-1", userId: "moving-player" },
+    ]);
+    expect(repository.signups.get("moving-player")).toMatchObject({ gameTier: 2 });
+    expect(bundle.assignments.find((item) => item.userId === "moving-player")).toMatchObject({
+      gameTier: 2,
+      status: "unassigned",
+      tableId: null,
+    });
+    expect(result.message).toContain("Tier 2");
+  });
+
+  it("plans capacity and roster order independently by tier and ignores backup GMs", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("locked");
+    repository.signups.set("gm-t1", signup("gm-t1", "gm", NOW));
+    repository.signups.set("gm-t2", {
+      ...signup("gm-t2", "gm", NOW + 1),
+      gameTier: 2,
+    });
+    repository.signups.set("gm-backup", {
+      ...signup("gm-backup", "gm", NOW + 2),
+      gameTier: null,
+      gmCommitment: "backup",
+    });
+    for (const gameTier of [1, 2] as const) {
+      for (let index = 1; index <= 4; index += 1) {
+        const id = `t${gameTier}-player-${index}`;
+        repository.signups.set(id, {
+          ...signup(id, "player", NOW + gameTier * 100 + index),
+          gameTier,
+        });
+      }
+    }
+    const generated = await service(repository, new FakeDiscord(), [
+      "plan-tiered",
+      "table-t1",
+      "table-t2",
+      ...Array.from({ length: 8 }, (_, index) => `assignment-${index + 1}`),
+    ]).generatePlan("synthetic-guild", "admin-1");
+
+    expect(generated.bundle.tables).toEqual([
+      expect.objectContaining({ tableId: "table-t1", gameTier: 1, gmUserId: "gm-t1" }),
+      expect.objectContaining({ tableId: "table-t2", gameTier: 2, gmUserId: "gm-t2" }),
+    ]);
+    expect(generated.bundle.tables.map((table) => table.gmUserId)).not.toContain(
+      "gm-backup",
+    );
+    for (const gameTier of [1, 2] as const) {
+      expect(
+        generated.bundle.assignments
+          .filter((assignment) => assignment.gameTier === gameTier)
+          .map((assignment) => assignment.rosterRank),
+      ).toEqual([1, 2, 3, 4]);
+    }
+  });
+
+  it("rejects a table choice outside the player's weekly tier", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("published");
+    const bundle = planBundle(draftPlan({ status: "published", publishedAt: NOW }));
+    bundle.tables[1].gameTier = 2;
+    bundle.assignments.push(assignment("player-t1"));
+    repository.bundles.set("plan-1", bundle);
+
+    await expect(
+      service(repository, new FakeDiscord()).selectTable({
+        guildId: "synthetic-guild",
+        planId: "plan-1",
+        tableId: "table-2",
+        userId: "player-t1",
+        action: "join",
+      }),
+    ).rejects.toThrow("Choose a table marked T1");
+    expect(repository.joinCalls).toHaveLength(0);
   });
 
   it("explains the priority and history of every selected and waitlisted GM", async () => {
@@ -1268,8 +1405,13 @@ describe("WeekService", () => {
     expect(repository.audits.at(-1)).toMatchObject({
       action: "plan.generated",
       details: {
-        selectedGms: ["gm-new"],
-        unselectedGms: ["gm-veteran"],
+        tiers: expect.arrayContaining([
+          expect.objectContaining({
+            gameTier: 1,
+            selectedGms: ["gm-new"],
+            unselectedGms: ["gm-veteran"],
+          }),
+        ]),
       },
     });
   });
@@ -1626,7 +1768,7 @@ describe("WeekService", () => {
         userId: "bench-player",
         action: "join",
       }),
-    ).rejects.toThrow("global waitlist");
+    ).rejects.toThrow("Tier 1");
     expect(repository.joinCalls).toHaveLength(0);
 
     await expect(
@@ -1669,7 +1811,7 @@ describe("WeekService", () => {
         displayName: "GM One",
         action: "gm",
       }),
-    ).resolves.toMatchObject({ message: "Signed up to run a game." });
+    ).resolves.toMatchObject({ message: "Signed up to run Tier 1 · Levels 3–4." });
 
     await expect(
       service(repository, new FakeDiscord(), [], playerSignupOpensAt).changeSignup({
@@ -1679,7 +1821,7 @@ describe("WeekService", () => {
         displayName: "Player One",
         action: "player",
       }),
-    ).resolves.toMatchObject({ message: "Signed up to play." });
+    ).resolves.toMatchObject({ message: "Signed up to play Tier 1 · Levels 3–4." });
   });
 
   it("rejects a table interaction replayed from a different guild", async () => {
@@ -1783,6 +1925,7 @@ describe("WeekService", () => {
       tableId: "table-old-incompatible",
       planId: "plan-old",
       tableNumber: 3,
+      gameTier: 1,
       title: "Old GM table",
       capacity: 2,
       gmUserId: "gm-no-longer-selected",
@@ -2052,7 +2195,7 @@ describe("WeekService", () => {
 
     expect(status).toContain("## Guild Assistant status");
     expect(status).toContain("Synthetic Saturday Games");
-    expect(status).toContain("1 GMs / 1 players");
+    expect(status).toContain("1 tiered GM / 1 players");
     expect(status).toContain("draft revision 1");
     expect(status).toContain("Saturday at 18:30");
     expect(status).toContain("**GM signup:** Wednesday at 17:00");

@@ -29,8 +29,10 @@ The complete audience-based documentation map is in [docs/README.md](docs/README
 
 A normal week happens in Discord:
 
-1. GMs click **Run a Game** when GM signup opens.
-2. Players click **Play** when player signup opens.
+1. GMs click **Run T1**, **Run T2**, or **Run T3** for the tier they will run;
+   late-absence coverage uses **Backup GM**.
+2. Players click **Play T1**, **Play T2**, or **Play T3** for their character's
+   tier when player signup opens.
 3. The bot publishes the tables and says who has a reserved place or is waiting.
 4. Players click **Join** on a table. Later, any unclaimed seats become
    first-come, first-served.
@@ -43,8 +45,8 @@ setup, deployment, database, or npm commands.
 
 - A five-stage weekly schedule in the guild's own time zone.
 - Fair, repeatable GM rotation and table planning.
-- Signup-order reservations, a global waitlist, table waitlists, and automatic
-  promotion when a seat opens.
+- Per-tier signup-order reservations, weekly and table waitlists, and automatic
+  same-tier promotion when a seat opens.
 - Review mode for organizers who want to approve tables, or Autopilot after the
   guild is comfortable with the workflow.
 - Optional reminders and a temporary Weekly GM role.

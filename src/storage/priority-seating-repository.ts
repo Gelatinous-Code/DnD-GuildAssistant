@@ -955,8 +955,12 @@ export class PrioritySeatingRepository {
              AND plan.plan_id = ? AND plan.status = 'published'
              AND event.status = 'published'
              AND event.table_selection_closes_at > ?
-             AND assignment.user_id = ? AND assignment.status <> 'withdrawn'
-             AND signup.signup_kind = 'player' AND signup.status = 'active'
+              AND assignment.user_id = ? AND assignment.status <> 'withdrawn'
+              AND signup.signup_kind = 'player' AND signup.status = 'active'
+              AND COALESCE(signup.game_tier, 0) =
+                  COALESCE(assignment.game_tier, 0)
+              AND COALESCE(assignment.game_tier, 0) =
+                  COALESCE(target.game_tier, 0)
              AND (
                expected.assignment_id IS NULL
                OR assignment.assignment_id = expected.assignment_id
@@ -2225,13 +2229,19 @@ export class PrioritySeatingRepository {
            JOIN plan_tables previous_table
              ON previous_table.table_id = previous_assignment.desired_table_id
            JOIN plans next_plan ON next_plan.event_id = previous_plan.event_id
-           JOIN assignments next_assignment
-             ON next_assignment.plan_id = next_plan.plan_id
-            AND next_assignment.user_id = previous_assignment.user_id
+            JOIN assignments next_assignment
+              ON next_assignment.plan_id = next_plan.plan_id
+             AND next_assignment.user_id = previous_assignment.user_id
+             AND COALESCE(next_assignment.game_tier, 0) =
+                 COALESCE(previous_assignment.game_tier, 0)
            JOIN plan_tables next_table
              ON next_table.plan_id = next_plan.plan_id
-            AND next_table.gm_user_id = previous_table.gm_user_id
-            AND next_table.table_id = next_assignment.desired_table_id
+             AND next_table.gm_user_id = previous_table.gm_user_id
+             AND next_table.table_id = next_assignment.desired_table_id
+             AND COALESCE(next_table.game_tier, 0) =
+                 COALESCE(previous_table.game_tier, 0)
+             AND COALESCE(next_table.game_tier, 0) =
+                 COALESCE(next_assignment.game_tier, 0)
            JOIN weekly_events event ON event.event_id = next_plan.event_id
            JOIN dm_priority_credits credit
              ON credit.credit_id = previous_assignment.priority_credit_id

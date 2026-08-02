@@ -48,6 +48,7 @@ Use [CONTRIBUTING.md](../CONTRIBUTING.md) for local development and
 
 Technical design and policy references:
 
+- [Weekly game tiers](game-tiers.md)
 - [GM selection policy](gm-priority-policy.md)
 - [Session completion policy](session-completion.md)
 - [DM priority token policy](dm-priority-token-policy.md)

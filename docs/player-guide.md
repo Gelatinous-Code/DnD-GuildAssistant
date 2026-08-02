@@ -9,8 +9,12 @@ If you get lost, run `/help`. The response is private.
 
 The weekly signup post changes as the week moves forward.
 
-- To run a game, click **Run a Game** after GM signup opens.
-- To play, click **Play** after player signup opens.
+- To run a game, click **Run T1**, **Run T2**, or **Run T3** for the tier you
+  will run after GM signup opens. Choose **Backup GM** only when you can cover a
+  late absence but are not offering another planned table.
+- To play, click **Play T1**, **Play T2**, or **Play T3** for your character's
+  level after player signup opens: Tier 1 is levels 3–4, Tier 2 is levels 5–7,
+  and Tier 3 is level 8+.
 - To drop out of the whole week, click **Withdraw**.
 
 Clicking the same signup choice again is safe. The bot will not count you twice.
@@ -24,14 +28,14 @@ When the bot publishes tables, click **Join** on the table you want.
   seated.
 - If that table is full, you join that table's waitlist.
 - If every weekly place was already reserved before you signed up, the bot tells
-  you that you are on the global waitlist.
+  you that you are on your tier's weekly waitlist.
 
 The two leave actions mean different things:
 
 - **Leave Table** removes only your table choice. You still intend to play that
   week.
 - **Withdraw** removes you from the whole week. Before open seating, the next
-  person on the global waitlist may inherit your reserved place.
+  person waiting in the same tier may inherit your reserved place.
 
 When open seating begins, any remaining places become first-come,
 first-served. Not choosing a table before then is not a punishment or a no-show;
@@ -42,14 +46,17 @@ At game time, table buttons close and the bot posts the final roster.
 ## If you are selected as a GM
 
 The bot chooses enough GMs for the available players using the guild's published
-rotation policy. Volunteering does not guarantee selection every week.
+rotation policy. Planning and GM selection happen separately within each tier.
+Volunteering does not guarantee selection every week. A **Backup GM** signup is
+visible to organizers but does not add player capacity.
 
 If your availability changes, use **Withdraw** as early as possible and tell an
 organizer. Organizers have an audited correction process when a published plan
 must change.
 
 Read the [GM selection policy](gm-priority-policy.md) if you want the exact
-ranking and tie-break rules.
+ranking and tie-break rules. See [Weekly game tiers](game-tiers.md) for tier
+choices, corrections, and same-tier waitlist behavior.
 
 ## DM priority tokens
 
@@ -85,7 +92,7 @@ organizer which post you clicked. Do not keep clicking an old control.
 ### I expected a seat but I am waiting
 
 Read the bot's private response first. It will distinguish a full table, the
-global weekly waitlist, and open seating. If the public roster still looks
+your tier's weekly waitlist, and open seating. If the public roster still looks
 wrong, ask an organizer to check `/week status`.
 
 ### I did not receive a token message

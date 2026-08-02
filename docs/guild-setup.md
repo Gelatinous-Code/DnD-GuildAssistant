@@ -160,7 +160,7 @@ six preferred, and six maximum:
 ```
 
 See the [player and GM guide](player-guide.md#choose-a-table) for the member-facing
-explanation of reservations, the global waitlist, table waitlists, and open
+explanation of per-tier reservations, same-tier waitlists, table waitlists, and open
 seating.
 
 ## Optional: reminder roles

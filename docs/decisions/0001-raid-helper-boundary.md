@@ -36,8 +36,8 @@ Times are evaluated in the configured IANA time zone. Defaults are shown; each g
 
 1. **Wednesday 17:00 — GM signup:** the scheduler creates the week and opens GM volunteering. Repeated Cron delivery uses the same event and operation keys.
 2. **Thursday 17:00 — player interest:** the Play button opens. A later GM/player choice replaces the member's earlier active choice instead of creating a duplicate.
-3. **Saturday 17:00 — tables:** signup order is snapshotted, deterministic GM priority and sizing create tables, and total capacity divides players into reserved and global-waitlist rosters. Review mode waits for `/week publish`; Autopilot publishes immediately.
-4. **Saturday through Monday — reserved selection:** reserved players choose any table with room. Leaving a table clears only that choice. Withdrawing drops the player from the week; before open seating, the first global-waitlist player inherits the reservation and receives a durable private notification.
+3. **Saturday 17:00 — tables:** weekly tier and signup order are snapshotted, deterministic GM priority and sizing create tables within each tier, and each tier's capacity divides its players into reserved and waitlisted rosters. Review mode waits for `/week publish`; Autopilot publishes immediately.
+4. **Saturday through Monday — reserved selection:** reserved players choose any table with room in their weekly tier. Leaving a table clears only that choice. Withdrawing drops the player from the week; before open seating, the first waitlisted player in the same tier inherits the reservation and receives a durable private notification.
 5. **Monday 17:00 — open seating:** signup-order protection ends. Any active player may claim remaining capacity first-come, first-served. A player who never chose a table is not penalized.
 6. **Tuesday 18:00 — finalize:** table controls close and the scheduler posts the final manifest. Drops are accepted until this boundary.
 7. **Tuesday 18:00–21:00 — play:** New Dawn's in-person games run for three hours; other guilds may configure another duration.

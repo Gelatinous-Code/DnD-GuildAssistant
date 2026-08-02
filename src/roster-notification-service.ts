@@ -8,6 +8,7 @@ import {
   GuildRepository,
   type RosterPromotionNotification,
 } from "./storage/repository";
+import { gameTierLabel } from "./domain/game-tier";
 
 const MAX_ATTEMPTS = 5;
 const RETRY_DELAYS_MINUTES = [15, 30, 60, 240] as const;
@@ -38,12 +39,14 @@ function promotionMessage(
   notification: RosterPromotionNotification,
   now: number,
 ): string {
-  const heading = `🎟️ **A player spot opened for ${notification.eventTitle}.**`;
+  const tier = gameTierLabel(notification.gameTier);
+  const heading =
+    `🎟️ **A ${tier} player spot opened for ${notification.eventTitle}.**`;
   if (now < notification.openSeatingAt) {
     return [
       heading,
-      "You are first on the global waitlist, so the open player reservation has moved to you.",
-      "Choose any published table that still has a seat. Your signup-order reservation lasts until " +
+      `You are first on the ${tier} waitlist, so that tier's open player reservation has moved to you.`,
+      `Choose any table marked ${tier} that still has a seat. Your signup-order reservation lasts until ` +
         discordTimestamp(notification.openSeatingAt) +
         ".",
       "A seat is not assigned until you choose a table. If life got in the way, no action is required and there is no penalty.",

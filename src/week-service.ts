@@ -16,6 +16,11 @@ import {
   type GmCandidate,
 } from "./domain/table-planner";
 import {
+  GAME_TIERS,
+  gameTierLabel,
+  type GameTier,
+} from "./domain/game-tier";
+import {
   cadenceFromConfig,
   NEW_DAWN_CADENCE,
   cadenceWindowsForStart,
@@ -35,7 +40,7 @@ import {
 } from "./storage/repository";
 import { UserFacingError } from "./interaction-utils";
 
-const ALGORITHM_VERSION = "balanced-rotation-v1";
+const ALGORITHM_VERSION = "tiered-balanced-rotation-v1";
 const WEEKDAY_NAMES = [
   "",
   "Monday",
@@ -232,7 +237,14 @@ export class WeekService {
       "**Current week:** " + safeInline(event.title) + " — " + unix(event.startsAt),
       "**Event ID:** " + safeInline(event.eventId, 180),
       "**Phase:** " + event.status,
-      "**Signups:** " + counts.gms + " GMs / " + counts.players + " players",
+      "**Signups:** " +
+        counts.gms +
+        " tiered GM" +
+        (counts.gms === 1 ? "" : "s") +
+        (counts.gmBackups ? " + " + counts.gmBackups + " backups" : "") +
+        " / " +
+        counts.players +
+        " players",
       "**Plan:** " +
         (currentPlan
           ? currentPlan.status + " revision " + currentPlan.generation +
@@ -474,17 +486,26 @@ export class WeekService {
     const description =
       audience === "gm"
         ? gmSignupEnabled
-          ? "Volunteer to run a game. This post is routed to the guild's GM signup channel."
+          ? "Choose the tier you plan to run, or volunteer as a backup GM. This post is routed to the guild's GM signup channel."
           : "GM signup is closed. Withdraw only if you are dropping from this week's games."
         : audience === "player"
           ? playerSignupEnabled
-            ? "Sign up to play. Signup order reserves available capacity until open seating."
+            ? "Choose your character's tier to play. Signup order reserves capacity within that tier until open seating."
             : "Player signup is not open yet."
           : playerSignupEnabled
-            ? "Sign up to run or play. Player signup order reserves available capacity until open seating."
+            ? "Choose a tier to run or play. Player signup order reserves capacity within that tier until open seating."
             : gmSignupEnabled
               ? "GM signup is open. Player interest opens at the time shown below."
               : "Tables are published. Withdraw only if you are dropping from this week's games.";
+    const primaryGms = gms.filter((signup) => signup.gmCommitment !== "backup");
+    const backupGms = gms.filter((signup) => signup.gmCommitment === "backup");
+    const visibleSignups =
+      audience === "gm"
+        ? primaryGms
+        : audience === "player"
+          ? players
+          : [...primaryGms, ...players];
+    const unclassified = visibleSignups.filter((signup) => signup.gameTier === null);
     return renderSignupMessage({
       eventId: event.eventId,
       title: event.title,
@@ -502,8 +523,17 @@ export class WeekService {
       gmSignupEnabled,
       playerSignupEnabled,
       withdrawEnabled,
-      gmNames: gms.map(userLabel),
-      playerNames: players.map(userLabel),
+      tierSignups: GAME_TIERS.map((gameTier) => ({
+        gameTier,
+        gmNames: primaryGms
+          .filter((signup) => signup.gameTier === gameTier)
+          .map(userLabel),
+        playerNames: players
+          .filter((signup) => signup.gameTier === gameTier)
+          .map(userLabel),
+      })),
+      backupGmNames: backupGms.map(userLabel),
+      unclassifiedNames: unclassified.map(userLabel),
     });
   }
 
@@ -608,7 +638,8 @@ export class WeekService {
     eventId: string;
     userId: string;
     displayName: string;
-    action: SignupKind | "withdraw";
+    action: SignupKind | "backup" | "withdraw";
+    gameTier?: GameTier;
   }): Promise<{ event: WeeklyEvent; payload: DiscordMessagePayload; message: string }> {
     const event = await this.repository.getWeeklyEvent(input.eventId);
     if (!event) throw new UserFacingError("That weekly signup no longer exists.");
@@ -657,7 +688,8 @@ export class WeekService {
           now < event.tableSelectionClosesAt)
       ) {
         throw new UserFacingError(
-          event.status === "published" && input.action === "gm"
+          event.status === "published" &&
+            (input.action === "gm" || input.action === "backup")
             ? "GM signup closed when tables were published. Ask an organizer about a late correction."
             : "New signups closed for this week.",
         );
@@ -668,20 +700,60 @@ export class WeekService {
           "Player signup opens " + unix(playerSignupOpensAt) + ". GM signup is open now.",
         );
       }
+      // Discord and slash-command handlers require an explicit tier. The
+      // fallback keeps trusted internal callers and pre-tier test fixtures
+      // deterministic without accepting an old public button.
+      const selectedTier = input.gameTier ?? 1;
+      const previousSignup = await this.repository.getSignup(
+        event.eventId,
+        input.userId,
+      );
+      const publishedTierChange =
+        event.status === "published" &&
+        input.action === "player" &&
+        previousSignup?.status === "active" &&
+        previousSignup.signupKind === "player" &&
+        previousSignup.gameTier !== selectedTier;
+      const signupKind: SignupKind =
+        input.action === "backup" ? "gm" : input.action;
       await this.repository.saveSignup({
         eventId: input.eventId,
         userId: input.userId,
         displayName: input.displayName,
-        signupKind: input.action,
+        signupKind,
+        gameTier: input.action === "backup" ? null : selectedTier,
+        gmCommitment:
+          input.action === "gm"
+            ? "primary"
+            : input.action === "backup"
+              ? "backup"
+              : null,
         source: "native",
       });
       if (input.action === "gm") {
-        message = "Signed up to run a game.";
+        message = `Signed up to run ${gameTierLabel(selectedTier)}.`;
+      } else if (input.action === "backup") {
+        message = "Signed up as a backup GM. You do not count as a planned table unless an organizer moves you into a tier.";
       } else if (event.status === "published") {
         const plan = await this.repository.getCurrentPlan(event.eventId);
         if (!plan || plan.status !== "published") {
           throw new UserFacingError(
             "The published table plan is not available. Ask an organizer for help.",
+          );
+        }
+        const currentAssignment = await this.repository.getAssignment(
+          plan.planId,
+          input.userId,
+        );
+        const assignmentTierChanged =
+          currentAssignment?.status !== "withdrawn" &&
+          currentAssignment?.gameTier !== undefined &&
+          currentAssignment.gameTier !== selectedTier;
+        if (publishedTierChange || assignmentTierChanged) {
+          await this.repository.withdrawAssignmentAndPromote(
+            plan.planId,
+            input.userId,
+            now < (event.openSeatingAt ?? event.signupLocksAt),
           );
         }
         const assignment = await this.repository.ensureUnassignedAssignment({
@@ -690,14 +762,18 @@ export class WeekService {
           userId: input.userId,
           displayName: input.displayName,
         });
+        if (publishedTierChange || assignmentTierChanged) {
+          const bundle = await this.repository.getPlanBundle(plan.planId);
+          if (bundle) await this.refreshPublishedTables(event, bundle);
+        }
         const openSeatingAt = event.openSeatingAt ?? event.signupLocksAt;
         message = now >= openSeatingAt
-          ? "Signed up to play. Open seating is active; claim any available table before game time."
+            ? `Signed up to play ${gameTierLabel(selectedTier)}. Open seating is active; claim any available table in that tier before game time.`
           : assignment.rosterStatus === "reserved"
-            ? "Signed up to play. An open weekly reservation is yours; choose any published table with space."
-            : "Signed up to play. The planned seats are reserved, so you are on the global waitlist. You will be privately notified if your reservation opens.";
+            ? `Signed up to play ${gameTierLabel(selectedTier)}. An open weekly reservation is yours; choose a table in that tier with space.`
+            : `Signed up to play ${gameTierLabel(selectedTier)}. That tier's planned seats are reserved, so you are on its waitlist. You will be privately notified if a reservation opens.`;
       } else {
-        message = "Signed up to play.";
+        message = `Signed up to play ${gameTierLabel(selectedTier)}.`;
       }
     }
     await this.repository.appendAudit({
@@ -707,7 +783,18 @@ export class WeekService {
       action: "signup." + input.action,
       entityType: "signup",
       entityId: input.userId,
-
+      details: {
+        gameTier:
+          input.action === "withdraw" || input.action === "backup"
+            ? null
+            : input.gameTier ?? 1,
+        gmCommitment:
+          input.action === "gm"
+            ? "primary"
+            : input.action === "backup"
+              ? "backup"
+              : null,
+      },
     });
     const latest = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
     return { event: latest, payload: await this.signupPayload(latest), message };
@@ -755,7 +842,8 @@ export class WeekService {
     actorUserId?: string;
     userId: string;
     displayName: string;
-    action: SignupKind | "withdraw";
+    action: SignupKind | "backup" | "withdraw";
+    gameTier?: GameTier;
   }): Promise<{ event: WeeklyEvent; warning?: string; requiresReplan: boolean }> {
     const event = await this.repository.getCurrentWeeklyEvent(input.guildId);
     if (!event) throw new UserFacingError("There is no active week to correct.");
@@ -763,11 +851,35 @@ export class WeekService {
       throw new UserFacingError("Archived or cancelled weeks cannot be corrected.");
     }
     const previousSignup = await this.repository.getSignup(event.eventId, input.userId);
+    const selectedTier = input.gameTier ?? previousSignup?.gameTier ?? 1;
     const plan = ["planned", "published"].includes(event.status)
       ? await this.repository.getCurrentPlan(event.eventId)
       : null;
+    const previousAssignment =
+      plan?.status === "published"
+        ? await this.repository.getAssignment(plan.planId, input.userId)
+        : null;
+    const playerTierChanged =
+      input.action === "player" &&
+      (
+        (
+          previousSignup?.status === "active" &&
+          previousSignup.signupKind === "player" &&
+          previousSignup.gameTier !== selectedTier
+        ) ||
+        (
+          previousAssignment?.status !== "withdrawn" &&
+          previousAssignment?.gameTier !== undefined &&
+          previousAssignment.gameTier !== selectedTier
+        )
+      );
     const affectsGm =
-      input.action === "gm" || previousSignup?.signupKind === "gm";
+      input.action === "gm" ||
+      input.action === "backup" ||
+      previousSignup?.signupKind === "gm";
+    const affectsDraftPlayers =
+      event.status === "planned" &&
+      (input.action === "player" || previousSignup?.signupKind === "player");
     let assignmentMayHaveChanged = false;
     if (input.action === "withdraw") {
       await this.repository.withdrawSignup(event.eventId, input.userId);
@@ -784,17 +896,35 @@ export class WeekService {
         eventId: event.eventId,
         userId: input.userId,
         displayName: input.displayName,
-        signupKind: input.action,
+        signupKind: input.action === "backup" ? "gm" : input.action,
+        gameTier: input.action === "backup" ? null : selectedTier,
+        gmCommitment:
+          input.action === "gm"
+            ? "primary"
+            : input.action === "backup"
+              ? "backup"
+              : null,
         source: "admin",
       });
       if (plan?.status === "published" && input.action === "player") {
+        if (playerTierChanged) {
+          await this.repository.withdrawAssignmentAndPromote(
+            plan.planId,
+            input.userId,
+            this.now() < (event.openSeatingAt ?? event.signupLocksAt),
+          );
+          assignmentMayHaveChanged = true;
+        }
         await this.repository.ensureUnassignedAssignment({
           assignmentId: this.id(),
           planId: plan.planId,
           userId: input.userId,
           displayName: input.displayName,
         });
-      } else if (plan?.status === "published" && input.action === "gm") {
+      } else if (
+        plan?.status === "published" &&
+        (input.action === "gm" || input.action === "backup")
+      ) {
         // A seated player who becomes a GM must immediately release their seat;
         // the normal promotion path keeps the visible published plan consistent.
         await this.repository.withdrawAssignmentAndPromote(
@@ -818,10 +948,11 @@ export class WeekService {
       action: "signup.admin-correction",
       entityType: "signup",
       entityId: input.userId,
-      details: { action: input.action },
+      details: { action: input.action, gameTier: input.gameTier ?? null },
     });
     const requiresReplan =
-      ["planned", "published"].includes(event.status) && affectsGm;
+      ["planned", "published"].includes(event.status) &&
+      (affectsGm || affectsDraftPlayers || playerTierChanged);
     return {
       event: latest,
       requiresReplan,
@@ -851,6 +982,7 @@ export class WeekService {
             tableId: null,
             userId: player.userId,
             displayName: player.displayName || player.userId,
+            gameTier: player.gameTier!,
             status: "unassigned" as const,
             waitlistPosition: null,
             ...rosterEntry,
@@ -878,7 +1010,8 @@ export class WeekService {
       const nextTable = previousTable
         ? nextTableByGm.get(previousTable.gmUserId)
         : undefined;
-      if (!nextTable) continue;
+      const player = playerById.get(assignment.userId)!;
+      if (!nextTable || nextTable.gameTier !== player.gameTier) continue;
       const candidates = compatible.get(nextTable.tableId) ?? [];
       candidates.push(assignment);
       compatible.set(nextTable.tableId, candidates);
@@ -960,36 +1093,60 @@ export class WeekService {
       previousPlan?.status === "published"
         ? await this.repository.getPlanBundle(previousPlan.planId)
         : null;
-    const [players, gms, stats] = await Promise.all([
+    const [players, allGms, stats] = await Promise.all([
       this.repository.listActiveSignups(event.eventId, "player"),
       this.repository.listActiveSignups(event.eventId, "gm"),
       this.repository.listGmSelectionStats(guildId),
     ]);
+    const gms = allGms.filter((signup) => signup.gmCommitment !== "backup");
+    const unclassified = [...players, ...gms].filter(
+      (signup) => signup.gameTier === null,
+    );
+    if (unclassified.length) {
+      throw new UserFacingError(
+        "A table draft cannot mix unclassified signups. Ask these members to use a tier button, or correct them with /week signup: " +
+          unclassified
+            .slice(0, 8)
+            .map((signup) => safeInline(userLabel(signup)))
+            .join(", ") +
+          (unclassified.length > 8 ? ` and ${unclassified.length - 8} more` : "") +
+          ".",
+      );
+    }
     const statsByGm = new Map(stats.map((stat) => [stat.gmUserId, stat]));
-    const gmCandidates: GmCandidate[] = gms.map((gm) => {
-      const history = statsByGm.get(gm.userId);
-      return {
-        userId: gm.userId,
-        displayName: gm.displayName,
-        signedUpAt: gm.signedUpAt,
-        selectionCount: history?.selectionCount ?? 0,
-        lastSelectedAt: history?.lastSelectedAt ?? null,
-      };
+    const tierPlans = GAME_TIERS.map((gameTier) => {
+      const tierPlayers = players.filter((player) => player.gameTier === gameTier);
+      const tierGms = gms.filter((gm) => gm.gameTier === gameTier);
+      const gmCandidates: GmCandidate[] = tierGms.map((gm) => {
+        const history = statsByGm.get(gm.userId);
+        return {
+          userId: gm.userId,
+          displayName: gm.displayName,
+          signedUpAt: gm.signedUpAt,
+          selectionCount: history?.selectionCount ?? 0,
+          lastSelectedAt: history?.lastSelectedAt ?? null,
+        };
+      });
+      const planned = planTables({
+        players: tierPlayers.map((player) => ({
+          userId: player.userId,
+          displayName: player.displayName,
+          signedUpAt: player.signedUpAt,
+        })),
+        gms: gmCandidates,
+        constraints: {
+          minPlayersPerTable: config.tableMinSize,
+          preferredPlayersPerTable: config.tablePreferredSize,
+          maxPlayersPerTable: config.tableMaxSize,
+        },
+      });
+      return { gameTier, players: tierPlayers, gmCandidates, planned };
     });
-    const planned = planTables({
-      players: players.map((player) => ({
-        userId: player.userId,
-        displayName: player.displayName,
-        signedUpAt: player.signedUpAt,
-      })),
-      gms: gmCandidates,
-      constraints: {
-        minPlayersPerTable: config.tableMinSize,
-        preferredPlayersPerTable: config.tablePreferredSize,
-        maxPlayersPerTable: config.tableMaxSize,
-      },
-    });
-    if (planned.tables.length === 0) {
+    const selectedTableCount = tierPlans.reduce(
+      (total, tier) => total + tier.planned.tables.length,
+      0,
+    );
+    if (selectedTableCount === 0) {
       const reason =
         players.length === 0
           ? "No players are signed up."
@@ -1000,33 +1157,42 @@ export class WeekService {
     }
 
     const planId = this.id();
-    const tableIds = planned.tables.map(() => this.id());
     const generation = await this.repository.getNextPlanGeneration(event.eventId);
-    const tables: SaveDraftPlanInput["tables"] = planned.tables.map((table, index) => ({
-      tableId: tableIds[index],
-      tableNumber: table.tableNumber,
-      title: "Table " + table.tableNumber,
-      capacity: table.capacity,
-      gmUserId: table.gm.userId,
-      gmDisplayName: table.gm.displayName ?? table.gm.userId,
-    }));
-    const rankedPlayers = [...players].sort(
-      (left, right) =>
-        left.signedUpAt - right.signedUpAt || left.userId.localeCompare(right.userId),
+    let tableNumber = 0;
+    const tables: SaveDraftPlanInput["tables"] = tierPlans.flatMap((tier) =>
+      tier.planned.tables.map((table) => {
+        tableNumber += 1;
+        return {
+          tableId: this.id(),
+          tableNumber,
+          gameTier: tier.gameTier,
+          title: `Table ${tableNumber} · T${tier.gameTier}`,
+          capacity: table.capacity,
+          gmUserId: table.gm.userId,
+          gmDisplayName: table.gm.displayName ?? table.gm.userId,
+        };
+      }),
     );
-    const benchUserIds = new Set(planned.waitlist.map((player) => player.userId));
     const roster = new Map<
       string,
       { rosterStatus: "reserved" | "bench"; rosterRank: number }
-    >(
-      rankedPlayers.map((player, index) => [
-        player.userId,
-        {
+    >();
+    for (const tier of tierPlans) {
+      const rankedPlayers = [...tier.players].sort(
+        (left, right) =>
+          left.signedUpAt - right.signedUpAt ||
+          left.userId.localeCompare(right.userId),
+      );
+      const benchUserIds = new Set(
+        tier.planned.waitlist.map((player) => player.userId),
+      );
+      for (const [index, player] of rankedPlayers.entries()) {
+        roster.set(player.userId, {
           rosterStatus: benchUserIds.has(player.userId) ? "bench" : "reserved",
           rosterRank: index + 1,
-        },
-      ]),
-    );
+        });
+      }
+    }
     // Revisions preserve table choices only for players who still hold a reserved seat.
     const assignments = this.carryForwardAssignments(players, tables, previousBundle, roster);
 
@@ -1041,8 +1207,11 @@ export class WeekService {
         maxTableSize: config.tableMaxSize,
         playerCount: players.length,
         gmSignupCount: gms.length,
-        selectedGmCount: planned.tables.length,
-        waitlistCount: planned.waitlist.length,
+        selectedGmCount: selectedTableCount,
+        waitlistCount: tierPlans.reduce(
+          (total, tier) => total + tier.planned.waitlist.length,
+          0,
+        ),
         createdByUserId: actorUserId ?? null,
       },
       tables,
@@ -1061,21 +1230,33 @@ export class WeekService {
       entityId: bundle.plan.planId,
       details: {
         generation,
-        selectedGms: planned.selectedGms.map((gm) => gm.userId),
-        unselectedGms: planned.unselectedGms.map((gm) => gm.userId),
-        capacities: planned.tables.map((table) => table.capacity),
+        tiers: tierPlans.map((tier) => ({
+          gameTier: tier.gameTier,
+          playerCount: tier.players.length,
+          selectedGms: tier.planned.selectedGms.map((gm) => gm.userId),
+          unselectedGms: tier.planned.unselectedGms.map((gm) => gm.userId),
+          capacities: tier.planned.tables.map((table) => table.capacity),
+          waitlistCount: tier.planned.waitlist.length,
+        })),
       },
     });
-    const gmExplanations = this.gmDecisionExplanations(
-      gmCandidates,
-      new Set(planned.selectedGms.map((gm) => gm.userId)),
-      players.length,
-      config.tableMinSize,
+    const explanations = tierPlans.flatMap((tier) =>
+      tier.players.length || tier.gmCandidates.length
+        ? [
+            `${gameTierLabel(tier.gameTier)}: ${tier.planned.rationale}`,
+            ...this.gmDecisionExplanations(
+              tier.gmCandidates,
+              new Set(tier.planned.selectedGms.map((gm) => gm.userId)),
+              tier.players.length,
+              config.tableMinSize,
+            ).map((explanation) => `T${tier.gameTier}: ${explanation}`),
+          ]
+        : [],
     );
     return {
       event,
       bundle,
-      preview: this.planPreview(event, bundle, [planned.rationale, ...gmExplanations]),
+      preview: this.planPreview(event, bundle, explanations),
     };
   }
 
@@ -1100,9 +1281,24 @@ export class WeekService {
     ];
     if (unassigned.length) warnings.push(unassigned.length + " reserved players still need to choose a table");
     if (bundle.plan.waitlistCount) {
+      const tierWaitlists = GAME_TIERS
+        .map((gameTier) => ({
+          gameTier,
+          count: bundle.assignments.filter(
+            (assignment) =>
+              assignment.gameTier === gameTier &&
+              assignment.rosterStatus === "bench" &&
+              assignment.status !== "withdrawn",
+          ).length,
+        }))
+        .filter((tier) => tier.count > 0)
+        .map((tier) => `T${tier.gameTier}: ${tier.count}`)
+        .join(", ");
       warnings.push(
         bundle.plan.waitlistCount +
-          " players are on the global waitlist in signup order. A drop before open seating promotes the first person.",
+          " players are on tier waitlists in signup order (" +
+          tierWaitlists +
+          "). A drop before open seating promotes the first person in that tier.",
       );
     }
     const input: PlanPreviewInput = {
@@ -1113,6 +1309,7 @@ export class WeekService {
         id: table.tableId,
         label: table.title,
         gmName: table.gmDisplayName,
+        gameTier: table.gameTier,
         capacity: table.capacity,
         players: bundle.assignments
           .filter((assignment) => assignment.tableId === table.tableId)
@@ -1120,7 +1317,7 @@ export class WeekService {
       })),
       waitlist: bundle.assignments
         .filter((assignment) => assignment.rosterStatus === "bench")
-        .map((assignment) => assignment.displayName),
+        .map((assignment) => `${assignment.displayName} (T${assignment.gameTier})`),
       warnings,
     };
     return renderPlanPreview(input);
@@ -1160,11 +1357,28 @@ export class WeekService {
     if (!event) throw new UserFacingError("There is no active week.");
     const plan = await this.repository.getLatestDraftPlan(event.eventId);
     if (!plan) throw new UserFacingError("There is no draft to override. Run /week plan first.");
+    const draftBundle = await this.repository.getPlanBundle(plan.planId);
+    const targetTable = draftBundle?.tables.find(
+      (table) => table.tableNumber === input.tableNumber,
+    );
+    if (!targetTable) {
+      throw new UserFacingError("That draft table does not exist.");
+    }
     let gmDisplayName: string | undefined;
     if (input.gmUserId) {
       const signup = await this.repository.getSignup(event.eventId, input.gmUserId);
-      if (!signup || signup.status !== "active" || signup.signupKind !== "gm") {
+      if (
+        !signup ||
+        signup.status !== "active" ||
+        signup.signupKind !== "gm" ||
+        signup.gmCommitment === "backup"
+      ) {
         throw new UserFacingError("The selected member is not an active GM signup for this week.");
+      }
+      if (signup.gameTier !== targetTable.gameTier) {
+        throw new UserFacingError(
+          `That GM signed up for ${signup.gameTier ? gameTierLabel(signup.gameTier) : "no tier"}. This table is ${gameTierLabel(targetTable.gameTier)}.`,
+        );
       }
       gmDisplayName = signup.displayName;
     }
@@ -1204,13 +1418,15 @@ export class WeekService {
       this.requireConfig(input.guildId),
     ]);
     const statsByGm = new Map(stats.map((stat) => [stat.gmUserId, stat]));
-    const gmCandidates: GmCandidate[] = gms.map((gm) => ({
+    const gmCandidates: GmCandidate[] = gms
+      .filter((gm) => gm.gmCommitment !== "backup")
+      .map((gm) => ({
       userId: gm.userId,
       displayName: gm.displayName,
       signedUpAt: gm.signedUpAt,
       selectionCount: statsByGm.get(gm.userId)?.selectionCount ?? 0,
       lastSelectedAt: statsByGm.get(gm.userId)?.lastSelectedAt ?? null,
-    }));
+      }));
     const explanations = this.gmDecisionExplanations(
       gmCandidates,
       new Set(bundle.tables.map((candidate) => candidate.gmUserId)),
@@ -1238,6 +1454,7 @@ export class WeekService {
       id: table.tableId,
       label: table.title,
       gmName: table.gmDisplayName,
+      gameTier: table.gameTier,
       capacity: table.capacity,
       players: bundle.assignments
         .filter((assignment) => assignment.status === "assigned" && assignment.tableId === table.tableId)
@@ -1467,7 +1684,16 @@ export class WeekService {
       );
     }
 
-    const previous = await this.repository.getAssignment(input.planId, input.userId);
+    const [previous, currentBundle] = await Promise.all([
+      this.repository.getAssignment(input.planId, input.userId),
+      this.repository.getPlanBundle(input.planId),
+    ]);
+    const requestedTable = currentBundle?.tables.find(
+      (candidate) => candidate.tableId === input.tableId,
+    );
+    if (!requestedTable) {
+      throw new UserFacingError("That table no longer exists.");
+    }
     if (input.action === "join") {
       if (!previous || previous.status === "withdrawn") {
         throw new UserFacingError("Only an active player signup can choose a table.");
@@ -1475,11 +1701,16 @@ export class WeekService {
       const openSeatingAt = event.openSeatingAt ?? event.signupLocksAt;
       if (previous.rosterStatus === "bench" && this.now() < openSeatingAt) {
         throw new UserFacingError(
-          "You are on the global waitlist because the currently planned seats were reserved by earlier signups. " +
-            "If a reserved player drops, the first waitlisted player is promoted and privately notified. " +
+          `You are on the ${gameTierLabel(previous.gameTier)} waitlist because that tier's planned seats were reserved by earlier signups. ` +
+            "If a reserved player in your tier drops, its first waitlisted player is promoted and privately notified. " +
             "Any remaining seats become first-come, first-served " +
             unix(openSeatingAt) +
             ".",
+        );
+      }
+      if (previous.gameTier !== requestedTable.gameTier) {
+        throw new UserFacingError(
+          `Your weekly signup is ${gameTierLabel(previous.gameTier)}. Choose a table marked T${previous.gameTier}.`,
         );
       }
     }
@@ -1533,6 +1764,7 @@ export class WeekService {
     if (joinedWaitlist) {
       const openTables = bundle.tables.filter((candidate) => {
         if (candidate.tableId === input.tableId) return false;
+        if (candidate.gameTier !== table.gameTier) return false;
         const occupied = bundle.assignments.filter(
           (assignment) =>
             assignment.status === "assigned" &&
