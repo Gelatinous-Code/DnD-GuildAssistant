@@ -10,18 +10,20 @@
     "commands:register": "node --env-file-if-exists=.dev.vars scripts/register-commands.mjs",
     "db:migrate:local": "wrangler d1 migrations apply dnd-guild-assistant --local",
     "db:migrate:remote": "wrangler d1 migrations apply dnd-guild-assistant --remote",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run --exclude \"test/integration/**\"",
+    "test:watch": "vitest --exclude \"test/integration/**\"",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "types": "wrangler types",
     "types:check": "wrangler types --check",
     "typecheck": "npm run types:check && tsc --noEmit",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test && npm run test:integration"
   },
   "dependencies": {
     "@js-temporal/polyfill": "^0.5.1",
     "discord-interactions": "4.4.0"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.20.1",
     "@types/node": "^26.1.2",
     "typescript": "7.0.2",
     "vitest": "4.1.10",
