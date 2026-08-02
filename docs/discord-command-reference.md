@@ -23,10 +23,11 @@ These require **Manage Server**.
 
 | Command | Purpose |
 | --- | --- |
-| `/guild setup` | Show the setup dashboard or change only the fields supplied. |
+| `/guild setup preset:Second Dawn Guild` | Discover Second Dawn's existing GM/player channels and permanent audience roles in one step. |
+| `/guild setup` | Show the setup dashboard or change only the fields supplied; other guilds retain the generic one-channel setup. |
 | `/guild automation` | Choose Paused, Review, or Autopilot and optional reminders or role sync. |
 | `/guild status` | Show saved settings, automation mode, and the current week. |
-| `/guild doctor` | Check the configured channel, permissions, roles, and role order. |
+| `/guild doctor` | Check every configured channel, permissions, notification role, and managed-role order. |
 
 ## Weekly event
 

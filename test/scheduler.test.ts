@@ -232,6 +232,28 @@ describe("scheduled orchestration", () => {
       }),
     );
   });
+  it("accepts the GM card as the complete post during the GM-only stage", async () => {
+    const gmOnly = event("open", {
+      playerSignupOpensAt: now + 60_000,
+      signupLocksAt: now + 120_000,
+      signupMessageId: null,
+      gmSignupChannelId: "201",
+      gmSignupMessageId: "gm-signup-message",
+    });
+    const repository = schedulerRepository({
+      listEventsForScheduler: vi.fn().mockResolvedValue([gmOnly]),
+    });
+    const handler = callbacks();
+
+    const report = await runScheduledTick(repository, handler, now);
+
+    expect(handler.openEvent).not.toHaveBeenCalled();
+    expect(handler.openPlayerSignups).not.toHaveBeenCalled();
+    expect(handler.lockAndPlanEvent).not.toHaveBeenCalled();
+    expect(report.actions).not.toContainEqual(
+      expect.objectContaining({ action: "open" }),
+    );
+  });
 
   it("announces open seating once through a persisted scheduler operation", async () => {
     const published = event("published", {

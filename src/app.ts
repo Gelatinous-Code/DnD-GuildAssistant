@@ -24,6 +24,10 @@ import {
   UserFacingError,
 } from "./interaction-utils";
 import {
+  resolveSecondDawnPreset,
+  SECOND_DAWN_PRESET,
+} from "./guild-preset";
+import {
   cancelPriorityForEvent,
   reconcilePriorityAfterPublish,
   handleM6Command,
@@ -161,10 +165,13 @@ function setupDashboard(config: GuildConfig | null): string {
     "## Guild Assistant setup",
     config
       ? "Your saved configuration is below. Supply only the options you want to change."
-      : "Nothing is saved yet. Choose `channel` once to accept these New Dawn starting values.",
+      : "Nothing is saved yet. Choose the Second Dawn preset or select one workflow channel.",
     "",
-    `${config?.eventChannelId ? "✅" : "❌"} **Workflow channel:** ${
+    `${config?.eventChannelId ? "✅" : "❌"} **Player signup and tables:** ${
       config?.eventChannelId ? `<#${config.eventChannelId}>` : "choose a text channel"
+    }`,
+    `${config?.eventChannelId ? "✅" : "❌"} **GM signup:** ${
+      config?.gmSignupChannelId ? `<#${config.gmSignupChannelId}>` : "same as the player channel"
     }`,
     `✅ **Weekly flow (${timezone}):**`,
     `1. GM signup opens ${weekdayName(gmDay)} at ${gmTime}`,
@@ -283,6 +290,7 @@ async function coreAutomationProblems(
 ): Promise<string[]> {
   const channelIds = [
     config.eventChannelId,
+    config.gmSignupChannelId,
     config.tableChannelId,
     config.reminderChannelId,
   ].filter((value): value is string => Boolean(value));
@@ -449,7 +457,8 @@ async function skipSchedulerStep(
 function setupSummary(config: GuildConfig): string {
   return [
     "✅ Guild configuration saved.",
-    "**Channel:** " + (config.eventChannelId ? "<#" + config.eventChannelId + ">" : "missing"),
+    "**Player signup and tables:** " + (config.eventChannelId ? "<#" + config.eventChannelId + ">" : "missing"),
+    "**GM signup channel:** " + (config.gmSignupChannelId ? "<#" + config.gmSignupChannelId + ">" : "same as player signup"),
     "**Time zone:** " + config.timezone,
     "**GM signup:** " +
       weekdayName(config.gmSignupDay ?? NEW_DAWN_CADENCE.gmSignup.weekday) +
@@ -490,7 +499,28 @@ async function handleGuildCommand(
     const current = await repository.getGuildConfig(guildId);
     if (invocation.options.size === 0) return ephemeral(setupDashboard(current));
 
-    const selectedChannelId = stringOption(invocation, "channel");
+    const preset = stringOption(invocation, "preset");
+    if (preset !== undefined && preset !== SECOND_DAWN_PRESET) {
+      throw new UserFacingError("Choose a recognized guild setup preset.");
+    }
+    let presetRouting: ReturnType<typeof resolveSecondDawnPreset> | undefined;
+    if (preset === SECOND_DAWN_PRESET) {
+      try {
+        const [channels, guildRoles] = await Promise.all([
+          discord.getGuildChannels(guildId),
+          discord.getGuildRoles(guildId),
+        ]);
+        presetRouting = resolveSecondDawnPreset(channels, guildRoles);
+      } catch (error) {
+        throw new UserFacingError(
+          "Second Dawn setup was not saved: " +
+            (error instanceof Error ? error.message : "the guild resources could not be discovered"),
+        );
+      }
+    }
+
+    const selectedChannelId =
+      stringOption(invocation, "channel") ?? presetRouting?.playerSignupChannelId;
     const channelId = selectedChannelId ?? current?.eventChannelId;
     if (!channelId) {
       throw new UserFacingError(
@@ -510,8 +540,9 @@ async function handleGuildCommand(
     }
 
     const selectedGmRoleId = stringOption(invocation, "gm_role");
-    const selectedReminderRoleId = stringOption(invocation, "reminder_role");
-    const selectedAdminRoleId = stringOption(invocation, "admin_role");
+    const selectedReminderRoleId =
+      stringOption(invocation, "reminder_role") ?? presetRouting?.playerReminderRoleId;
+    const selectedAdminRoleId = stringOption(invocation, "admin_role") ?? presetRouting?.adminRoleId;
     const clearGmRole = booleanOption(invocation, "clear_gm_role") === true;
     const clearReminderRole = booleanOption(invocation, "clear_reminder_role") === true;
     const clearAdminRole = booleanOption(invocation, "clear_admin_role") === true;
@@ -583,6 +614,7 @@ async function handleGuildCommand(
       guildId,
       eventChannelId: selectedChannelId,
       tableChannelId: selectedChannelId,
+      gmSignupChannelId: presetRouting?.gmSignupChannelId,
       reminderChannelId: selectedChannelId,
       gmRoleId: clearGmRole ? null : selectedGmRoleId,
       adminRoleId: clearAdminRole ? null : selectedAdminRoleId,
@@ -630,6 +662,11 @@ async function handleGuildCommand(
     ];
     return ephemeral(boundedDiscordContent(
       setupSummary(config) +
+        (presetRouting
+          ? "\n**Second Dawn preset:** GM signups route to <#" +
+            presetRouting.gmSignupChannelId + ">; the permanent GM role <@&" +
+            presetRouting.verifiedGmRoleId + "> remains managed by Discord channel access.\n"
+          : "") +
         (problems.length
           ? "\n\n**Setup checks:**\n" + problems.join("\n")
           : "\n\n✅ Core setup checks passed.") +
@@ -735,6 +772,7 @@ async function handleGuildCommand(
     const channelIds = [
       config.eventChannelId,
       config.tableChannelId,
+      config.gmSignupChannelId,
       config.reminderChannelId,
     ].filter((value): value is string => Boolean(value));
     const [guildRoles, botMember] = await Promise.all([
@@ -1411,7 +1449,7 @@ async function handleComponent(
   const guildId = requireGuild(interaction);
   const userId = invokingUserId(interaction);
   if (!userId) throw new UserFacingError("Discord did not identify the member.");
-  const { discord, week } = services(env);
+  const { week } = services(env);
 
   if (component.kind === "signup") {
     const result = await week.changeSignup({
@@ -1421,13 +1459,7 @@ async function handleComponent(
       displayName: invokingDisplayName(interaction),
       action: component.action,
     });
-    if (result.event.signupChannelId && result.event.signupMessageId) {
-      await discord.editChannelMessage(
-        result.event.signupChannelId,
-        result.event.signupMessageId,
-        result.payload,
-      );
-    }
+    await week.refreshSignupPosts(result.event);
     return ephemeral("✅ " + result.message);
   }
 

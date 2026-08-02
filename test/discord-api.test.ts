@@ -176,6 +176,18 @@ describe("DiscordRestClient", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE_URL}/channels/200`);
   });
 
+  it("lists guild channels for setup preset discovery", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse([{ id: "200", type: 0, guild_id: "10", name: "gm-sign-up" }]),
+    );
+
+    const channels = await client.getGuildChannels("10");
+
+    expect(channels).toEqual([
+      expect.objectContaining({ id: "200", name: "gm-sign-up" }),
+    ]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE_URL}/guilds/10/channels`);
+  });
   it("opens a DM and enforces a stable nonce with no allowed mentions", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ id: "700", type: 1 }))
@@ -530,6 +542,36 @@ describe("Discord message rendering", () => {
       ],
     });
   });
+  it("renders focused GM and player signup cards without broad mentions", () => {
+    const gmCard = renderSignupMessage({
+      eventId: "event-1",
+      title: "Games",
+      startsAt,
+      status: "open",
+      audience: "gm",
+      playerSignupEnabled: false,
+    });
+    const playerCard = renderSignupMessage({
+      eventId: "event-1",
+      title: "Games",
+      startsAt,
+      status: "open",
+      audience: "player",
+      gmSignupEnabled: false,
+    });
+
+    expect(gmCard.components?.[0]?.components.map((button) => button.label)).toEqual([
+      "Run a Game", "Withdraw",
+    ]);
+    expect(gmCard.embeds?.[0]?.fields?.map((field) => field.name)).toEqual([
+      "Game Masters (0)",
+    ]);
+    expect(playerCard.components?.[0]?.components.map((button) => button.label)).toEqual([
+      "Play", "Withdraw",
+    ]);
+    expect(playerCard.allowed_mentions).toEqual(safeAllowedMentions());
+  });
+
 
   it("disables signup actions when locked and removes them when archived", () => {
     const locked = renderSignupMessage({

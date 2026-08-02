@@ -39,6 +39,7 @@ export interface GuildConfig {
   guildId: string;
   announcementChannelId?: string | null;
   eventChannelId: string | null;
+  gmSignupChannelId?: string | null;
   tableChannelId: string | null;
   reminderChannelId: string | null;
   adminRoleId: string | null;
@@ -78,6 +79,7 @@ export interface GuildConfigPatch {
   guildId: string;
   announcementChannelId?: string;
   eventChannelId?: string;
+  gmSignupChannelId?: string | null;
   tableChannelId?: string;
   reminderChannelId?: string;
   adminRoleId?: string | null;
@@ -128,6 +130,8 @@ export interface WeeklyEvent {
   sourceExternalId: string | null;
   signupChannelId: string | null;
   signupMessageId: string | null;
+  gmSignupChannelId?: string | null;
+  gmSignupMessageId?: string | null;
   tableChannelId: string | null;
   tableMessageId: string | null;
   finalManifestChannelId: string | null;
@@ -412,6 +416,7 @@ type GuildConfigRow = {
   guild_id: string;
   event_channel_id: string | null;
   table_channel_id: string | null;
+  gm_signup_channel_id: string | null;
   reminder_channel_id: string | null;
   admin_role_id: string | null;
   gm_role_id: string | null;
@@ -458,6 +463,8 @@ type WeeklyEventRow = {
   signup_channel_id: string | null;
   signup_message_id: string | null;
   table_channel_id: string | null;
+  gm_signup_channel_id: string | null;
+  gm_signup_message_id: string | null;
   table_message_id: string | null;
   final_manifest_channel_id: string | null;
   final_manifest_message_id: string | null;
@@ -639,6 +646,7 @@ function guildConfigFromRow(row: GuildConfigRow): GuildConfig {
     eventChannelId: row.event_channel_id,
     tableChannelId: row.table_channel_id,
     reminderChannelId: row.reminder_channel_id,
+    gmSignupChannelId: row.gm_signup_channel_id,
     adminRoleId: row.admin_role_id,
     gmRoleId: row.gm_role_id,
     reminderRoleId: row.reminder_role_id,
@@ -693,6 +701,8 @@ function eventFromRow(row: WeeklyEventRow): WeeklyEvent {
     signupMessageId: row.signup_message_id,
     tableChannelId: row.table_channel_id,
     tableMessageId: row.table_message_id,
+    gmSignupChannelId: row.gm_signup_channel_id,
+    gmSignupMessageId: row.gm_signup_message_id,
     finalManifestChannelId: row.final_manifest_channel_id,
     finalManifestMessageId: row.final_manifest_message_id,
     tableStateVersion: row.table_state_version ?? 0,
@@ -880,6 +890,7 @@ export class GuildRepository {
         .prepare(
           `UPDATE guild_config SET
              event_channel_id = COALESCE(?, event_channel_id),
+             gm_signup_channel_id = CASE WHEN ? = 1 THEN ? ELSE gm_signup_channel_id END,
              table_channel_id = COALESCE(?, table_channel_id),
              reminder_channel_id = COALESCE(?, reminder_channel_id),
              admin_role_id = CASE WHEN ? = 1 THEN ? ELSE admin_role_id END,
@@ -910,6 +921,8 @@ export class GuildRepository {
         )
         .bind(
           asNullable(input.announcementChannelId ?? input.eventChannelId),
+          Number(input.gmSignupChannelId !== undefined),
+          asNullable(input.gmSignupChannelId),
           asNullable(input.tableChannelId),
           asNullable(input.reminderChannelId),
           Number(input.adminRoleId !== undefined),
@@ -1252,6 +1265,8 @@ export class GuildRepository {
     messages: {
       signupChannelId?: string;
       signupMessageId?: string;
+      gmSignupChannelId?: string;
+      gmSignupMessageId?: string;
       tableChannelId?: string;
       tableMessageId?: string;
     },
@@ -1261,6 +1276,8 @@ export class GuildRepository {
         `UPDATE weekly_events SET
            signup_channel_id = COALESCE(?, signup_channel_id),
            signup_message_id = COALESCE(?, signup_message_id),
+           gm_signup_channel_id = COALESCE(?, gm_signup_channel_id),
+           gm_signup_message_id = COALESCE(?, gm_signup_message_id),
            table_channel_id = COALESCE(?, table_channel_id),
            table_message_id = COALESCE(?, table_message_id),
            updated_at = ?
@@ -1269,6 +1286,8 @@ export class GuildRepository {
       .bind(
         asNullable(messages.signupChannelId),
         asNullable(messages.signupMessageId),
+        asNullable(messages.gmSignupChannelId),
+        asNullable(messages.gmSignupMessageId),
         asNullable(messages.tableChannelId),
         asNullable(messages.tableMessageId),
         this.now(),
