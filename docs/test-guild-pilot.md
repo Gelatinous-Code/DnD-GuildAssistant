@@ -1,110 +1,282 @@
 # Test-guild go-live pilot
 
-Run this checklist in a disposable Discord guild before enabling the assistant
-for the real guild. The pilot intentionally uses small tables so two or three
-test members can prove capacity, displacement, promotion, and privacy without a
-large rehearsal group.
+This is an acceptance checklist, not a deployment guide. Begin only after the
+release candidate has been migrated and deployed, the Discord endpoint is
+verified, and `/ping` works in a disposable server. Use the
+[first-deployment guide](first-deployment.md) when any of those are missing.
+
+Exploratory testing may use an unmerged branch, but a formal **PASS** must use an
+exact commit that is already on `main`. Merge the reviewed release first, check
+out the resulting `main` commit, then migrate, deploy, and pilot that exact SHA.
+This rule also covers squash and rebase merges, which create a new commit SHA.
+Merging changes source control only; it does not migrate D1 or deploy the Worker.
+
+## Time and people required
+
+This is not a 10-minute smoke test. The manual M6 token path needs one completed
+source event and two target events. The scheduled-mode checks add two more test
+events. Events last four hours, and the source DM cannot receive priority tokens
+until the source event has ended. Expect about 60–90 minutes of hands-on work
+spread over at least seven elapsed hours. It is reasonable to split the pilot
+across a day or several test sessions.
+
+One **pilot lead** needs the repository checkout, Cloudflare access, Wrangler
+authentication, and Manage Server. That lead can act as Member A. Members B and
+C need only ordinary Discord accounts in the test server. The deployer may
+provide the Worker/D1 start-gate evidence to the pilot lead.
+
+Use three distinct test members throughout:
+
+| Label | Source event | Target events |
+| --- | --- | --- |
+| **Member A** | GM; earns two priority tokens | Player; uses priority |
+| **Member B** | Player | Ordinary player who is displaced and promoted |
+| **Member C** | Player | GM who supplies the target table |
 
 Do not paste bot tokens, interaction tokens, private attendance, or another
 member's token history into this document or a GitHub issue. Record Discord and
 D1 identifiers only in the redacted evidence block at the end.
 
-## Deployment order
+## Start gate
 
-1. Merge the reviewed release PR.
-2. Apply every pending D1 migration remotely.
-3. Deploy the Worker.
-4. Register the updated test-guild commands through the protected GitHub
-   workflow and approve the environment when prompted.
-5. Run `/guild doctor` and resolve every failure.
-6. Keep automation in **Review before publish** for the first synthetic weeks.
-7. Complete the review-mode acceptance below.
-8. Enable **Autopilot**, prove one scheduled transition, then prove pause and
-   recovery before considering the pilot complete.
+Stop and repair the installation if any required check fails:
+
+- [ ] Record the full tested commit from `git rev-parse HEAD`, and confirm that
+      exact commit is on `main` with `git merge-base --is-ancestor HEAD main`.
+- [ ] Confirm the Worker health URL returns `status: ready`.
+- [ ] Run `npx wrangler deployments list` and record the latest deployment ID
+      whose time matches the tested deploy.
+- [ ] Confirm `npx wrangler d1 migrations list DB --remote`
+      reports no pending migrations.
+- [ ] Record the applied migration level as the highest numbered `.sql` file in
+      `migrations/`. The empty pending list proves that checkout's files have
+      been applied.
+- [ ] Run `/ping` in the disposable server.
+- [ ] Run `/guild setup` with no options and confirm the intended test channel,
+      schedule, signup window, and table policy.
+- [ ] Explicitly pause scheduled lifecycle work:
+
+      `/guild automation mode:Paused confirm:True`
+
+- [ ] Run `/guild status`, then `/guild doctor`. Fix every ❌. For this pilot,
+      **Attach Files is required** because section 1 exercises `/week export`.
 
 ## Reduced-capacity fixture
 
-Configure one-seat or two-seat tables only in the disposable guild. Use at least
-three test members:
+Use this exact table policy so three people can prove capacity and waitlist
+behavior:
 
-- one organizer who can also run the source game as DM;
-- one ordinary player who selects a target table first; and
-- the eligible DM acting as a player in a later week.
+```text
+/guild setup minimum:1 preferred:1 maximum:1
+```
 
-Use synthetic dates far enough apart to make the lifecycle readable. The source
-week must finish and be archived before its session is confirmed. The two earned
-tokens are then available for later target events.
+Run `/guild setup` again and verify the saved values. Never use this reduced
+policy in the real guild.
 
-## Review-mode acceptance
+The first three events are manual while automation is Paused. This prevents a
+15-minute Cron run from locking an event while testers are still clicking.
+Sections 5 and 6 turn scheduling back on at controlled times.
 
-### A. Setup and ordinary weekly workflow
+## Create a safe near-future start time
 
-- [ ] Run `/guild setup` with the disposable operations channel, local time
-      zone, small table limits, and optional test roles.
-- [ ] Run `/guild automation mode:Review before publish confirm:True`.
-- [ ] Run `/guild doctor`; save only the aggregate pass/fail summary.
-- [ ] Open a synthetic source week and exercise GM, player, and withdrawal
-      controls, including one repeated click.
-- [ ] Lock, plan, review, publish, select tables, waitlist, promote, finalize,
-      export, and archive without a spreadsheet or manual roster assembly.
-- [ ] Retry one already completed operation and verify no duplicate message or
-      assignment is created.
+Before each manual `/week open`, run this in PowerShell. The first value is 20
+minutes from now; the second is the fixed four-hour event end:
 
-### B. Confirm a completed source session
+```powershell
+$pilotEventStart = (Get-Date).ToUniversalTime().AddMinutes(20)
+$pilotEventStart.ToString("yyyy-MM-ddTHH:mm:ssZ")
+$pilotEventStart.AddHours(4).ToString("yyyy-MM-ddTHH:mm:ssZ")
+```
 
-- [ ] Use `/session status` for the archived source table. Confirm the seeded
-      draft matches the immutable final roster.
-- [ ] Record a no-show, walk-in, or substitute with `/session attendance`, then
-      inspect status again. Confirm no public message changes.
-- [ ] Use `/session confirm result:Completed confirm:True`.
-- [ ] Repeat the exact confirmation. Verify one completion revision, one grant,
-      and exactly two available DM priority tokens.
-- [ ] As the DM, run `/priority status`. Verify the response is private and
-      shows both usable-through dates in the guild time zone.
-- [ ] Confirm the award DM arrives once. If DMs are blocked, verify the token
-      state is still correct and private admin diagnostics show a sanitized
-      blocked delivery.
+Use the first value as `starts_at`. Keep the second value so you know when
+source-session confirmation becomes available. If the checklist takes longer
+than expected before `/week open`, generate fresh values.
 
-### C. Guaranteed seat, displacement, and promotion
+## Manual M6 acceptance (automation Paused)
 
-- [ ] Open and publish target week A with a deliberately full table.
-- [ ] The ordinary player selects the table first.
-- [ ] The eligible DM signs up as a player, previews priority, reads the
-      displacement warning, and explicitly confirms it.
-- [ ] Verify the DM is assigned, exactly one ordinary player is waitlisted, the
-      table is not over capacity, and both private outcomes are understandable.
-- [ ] Repeat the priority confirmation; verify no second token is reserved.
-- [ ] Open another priority preview, change the table roster before clicking its
-      button, and verify the stale confirmation is rejected without changing a
-      seat or token. Open a fresh preview before continuing.
-- [ ] Release or move the priority request before selection closes. Verify the
-      original standard request time is retained and the next eligible member
-      is promoted deterministically.
-- [ ] Confirm priority again, finalize target week A, and verify the seated
-      request redeems exactly one token.
+### 1. Run and finish the source event
 
-### D. Refund, correction, and expiry
+- [ ] Generate a fresh start time with the PowerShell helper, then open the
+      source event:
 
-- [ ] Open target week B and reserve the remaining token.
-- [ ] Cancel the target event or use an authorized, reasoned refund. Verify the
-      token returns with its original expiration date.
-- [ ] Use `/priority-admin diagnose` to explain the grant, reservation, seating,
-      refund, and notification outcomes without a direct D1 edit.
-- [ ] Correct the source completion or grant with a concise reason, confirm the
-      append-only history, then retry the correction.
-- [ ] Advance a synthetic clock in automated acceptance or wait for a test token
-      boundary. Verify pre-expiry and expiry notifications are each idempotent.
+      `/week open starts_at:<first-helper-value> title:Pilot source event`
 
-### E. Autopilot, failure, and rollback
+- [ ] Member A clicks **Run a Game**. Members B and C click **Play**. Have Member
+      C withdraw and click **Play** again; have Member A repeat **Run a Game**.
+      Run `/week status` and verify one GM and two players, with no duplicates.
+- [ ] Run these commands in order:
 
-- [ ] Enable `/guild automation mode:Autopilot confirm:True` only after sections
-      A–D pass.
-- [ ] Observe one scheduled transition and verify its operation record.
-- [ ] Temporarily remove a harmless test-channel permission or block a test DM,
-      exercise the failure path, restore it, and use the documented retry.
-- [ ] Pause automation. Confirm no new scheduled weekly transition occurs while
-      priority expiry/notification maintenance continues safely.
-- [ ] Re-enable review mode and confirm `/guild doctor` returns ready.
+      `/week lock`
+
+      `/week plan`
+
+      Confirm the private draft has one table, Member A as GM, and capacity 1.
+- [ ] Run `/week publish`, then immediately run `/week publish` again. Verify the
+      second call reconciles the same table message instead of creating another.
+- [ ] Member B selects table 1 and becomes seated. Member C selects table 1 and
+      becomes waitlisted. Member B leaves the table; verify Member C is promoted.
+      Member B selects it again and becomes waitlisted. At every point, exactly
+      one player is seated.
+- [ ] At or after the saved start time, run this twice:
+
+      `/week retry step:Finalize table manifest`
+
+      Confirm there is one final manifest, not two.
+- [ ] Run `/week export` and verify a private CSV attachment downloads. Then run
+      `/week archive`. The CSV is only a portability check; do not use a
+      spreadsheet to repair the roster.
+
+### 2. Confirm the source session and award Member A
+
+- [ ] Wait until the second PowerShell helper value—the source event's four-hour
+      end. `/session` intentionally refuses an event that has not ended.
+- [ ] Run `/session status table_number:1`. Confirm it identifies the expected
+      source event, plan, and table and says there are no attendance deviations
+      or confirmed snapshot yet. Compare the public final manifest separately.
+- [ ] Exercise a private attendance deviation, for example:
+
+      `/session attendance table_number:1 member:@MemberC role:Player outcome:No-show reason:Pilot no-show`
+
+      Member C is the seated source player. Run `/session status table_number:1`
+      again, verify the private draft now contains the deviation, and verify no
+      public message changed.
+- [ ] Run this command twice:
+
+      `/session confirm table_number:1 result:Completed confirm:True`
+
+      Verify one completion revision, one reward grant, and exactly two tokens.
+- [ ] As Member A, run `/priority status`. Confirm the response is private and
+      shows two available tokens and their guild-local usable-through dates.
+- [ ] Allow one Cron interval (up to 15 minutes) for the queued award DM. Confirm
+      it arrives once. Run `/priority-admin diagnose member:@MemberA` to
+      distinguish pending, sent, and blocked delivery. If testing blocked DMs,
+      Member A must block them before confirmation; the token state must still be
+      correct. Wait longer only when diagnostics show a retryable delivery.
+
+### 3. Use one token in target event A
+
+- [ ] Generate a fresh start time and run
+      `/week open starts_at:<first-helper-value> title:Pilot target A`.
+- [ ] Member C clicks **Run a Game**. Members A and B click **Play**. Run
+      `/week lock`, `/week plan`, and `/week publish` in that order. Confirm one
+      table with Member C as GM and capacity 1.
+- [ ] Member B selects table 1 first. Member A selects it second and becomes
+      waitlisted.
+- [ ] As Member A, run `/priority use table_number:1` but do not click the
+      confirmation button yet. Member B leaves and reselects table 1. Click the
+      old confirmation; verify it is rejected as stale with no token change.
+- [ ] Restore the displacement setup: Member A leaves table 1, Member B is
+      promoted, and Member A selects table 1 again and becomes waitlisted.
+- [ ] Member A runs `/priority use table_number:1` again and confirms its bound
+      button. Verify Member A is seated, Member B is waitlisted, and the table is
+      not over capacity. Click the same confirmation again and verify no second
+      token is reserved.
+- [ ] Member A runs `/priority release confirm:True`. Verify Member B is promoted
+      and Member A retains the ordinary waitlisted request.
+- [ ] Member A opens a fresh `/priority use table_number:1` preview and confirms
+      it. Verify the same deterministic displacement result.
+- [ ] At or after target A's start time, run
+      `/week retry step:Finalize table manifest`. Member A then runs
+      `/priority status` and verifies one token remains available. The organizer
+      runs `/priority-admin diagnose member:@MemberA` and verifies the other is
+      redeemed. Run `/week archive` before opening target B.
+
+### 4. Refund the second token in target event B
+
+- [ ] Generate a fresh start time and run
+      `/week open starts_at:<first-helper-value> title:Pilot target B`.
+- [ ] Member C clicks **Run a Game**. Members A and B click **Play**. Run
+      `/week lock`, `/week plan`, and `/week publish` in that order.
+- [ ] Member A selects table 1, runs `/priority use table_number:1`, and confirms
+      the bound button. Run `/priority-admin diagnose member:@MemberA` and record
+      the admin-only grant and credit identifiers privately.
+- [ ] Cancel before the start time:
+
+      `/week cancel reason:Pilot cancellation refund`
+
+      Member A runs `/priority status` and verifies the token is available again
+      with its original expiration date. Diagnostics must show the reservation,
+      seating, cancellation, and refund without any direct D1 edit.
+- [ ] At the end of the priority-token portion, use the private `grant_id` from diagnostics
+      to exercise one append-only correction:
+
+      `/priority-admin correct grant_id:<private-grant-id> reason:Pilot correction confirm:True`
+
+      Verify diagnostics show one correction. Exact duplicate-delivery replay is
+      covered by automated tests because a new slash command has a new request ID.
+
+## Scheduled-mode acceptance
+
+### 5. Prove Review before publish
+
+- [ ] Confirm no event is active, then choose a local game time two to three
+      hours in the future. In the guild's IANA time zone, save that weekday and
+      `HH:mm` time with a short test window:
+
+      `/guild setup timezone:<IANA-zone> weekday:<day> time:<HH:mm> signup_lead_days:1 lock_lead_hours:1`
+
+- [ ] Enable Review without changing any custom reminder rule:
+
+      `/guild automation mode:Review before publish confirm:True role_sync:False`
+
+- [ ] Allow up to two Cron intervals (30 minutes) for the scheduled event to be
+      created and opened. Members A and B click **Play** and Member C clicks
+      **Run a Game** as soon as the signup message appears.
+- [ ] At one hour before the configured start, allow up to one more Cron interval.
+      Run `/week status`. Verify the phase is planned, the recent operations show
+      `lock-plan`, and no table publication exists. This is Review's approval
+      stop.
+- [ ] Run `/week publish`, verify one public table, then clear this synthetic event
+      with `/week cancel reason:Pilot review-mode complete`.
+- [ ] Immediately return to `/guild automation mode:Paused confirm:True` before
+      changing the schedule for the next check.
+
+### 6. Prove Autopilot, pause, and recovery
+
+- [ ] While Paused, choose another local game time about two hours in the future
+      and update only `weekday` and `time` with `/guild setup`.
+- [ ] Enable Autopilot without changing reminders:
+
+      `/guild automation mode:Autopilot confirm:True role_sync:False`
+
+- [ ] Allow up to two Cron intervals for the event to be created/opened. Run
+      `/week status` and verify the recent operation record. This is the required
+      scheduled Autopilot open transition. Members A and B immediately click
+      **Play** and Member C clicks **Run a Game**.
+- [ ] Immediately run `/guild automation mode:Paused confirm:True`. Wait until
+      the one-hour lock deadline has passed plus one Cron interval; `/week status`
+      must still show the open phase.
+- [ ] While still Paused, temporarily deny **Send Messages** to the bot in the
+      test channel. `/guild doctor` must show a ❌, and an attempt to enable Review
+      must be refused. Restore Send Messages and require `/guild doctor` to pass.
+- [ ] Enable Review again:
+
+      `/guild automation mode:Review before publish confirm:True role_sync:False`
+
+      Because the lock deadline is now past, allow one Cron interval and verify
+      `/week status` shows the recovered `lock-plan` operation and a planned
+      draft.
+- [ ] Switch that planned event back to Autopilot with
+      `/guild automation mode:Autopilot confirm:True role_sync:False`. Allow one
+      Cron interval and verify `/week status` shows one successful publish
+      operation and exactly one public table message. Allow one additional Cron
+      interval and verify no duplicate appears. Finish with
+      `/week cancel reason:Pilot autopilot publication complete`.
+- [ ] Return the disposable guild to a safe state with
+      `/guild automation mode:Paused confirm:True`, then verify `/guild status`
+      reports **Paused**. Do not leave the reduced-capacity pilot schedule in
+      Review or Autopilot.
+
+## Checks covered by automation
+
+Do not wait for a real token-expiration boundary, edit D1 timestamps, or try to
+advance the deployed Worker's clock. `npm run check` covers pre-expiry delivery,
+expiry, retry, stale confirmation, and skipped-generation recovery with a
+controlled test clock. Record the green CI/test run in the evidence below.
+
+The human pilot proves the Discord-facing workflow, permissions, privacy,
+delivery behavior, and recovery controls. Automated tests prove long-duration
+time boundaries that are impractical to reproduce safely by hand.
 
 ## Evidence template
 
@@ -113,8 +285,8 @@ stable labels such as `member-a`; never include notification bodies.
 
 ```text
 Pilot date/time zone:
-Release commit / Worker version:
-D1 migration versions:
+Full release commit / Worker deployment ID:
+D1 migration level (highest applied file):
 Test guild label:
 
 Source event/table labels:
@@ -124,7 +296,7 @@ Actual tables, seats, waitlist:
 
 Completion revisions: expected / actual
 Reward grants: expected / actual
-Credits by terminal state: available / reserved / redeemed / expired / corrected
+Credits observed: available / reserved / redeemed / refunded / corrected
 Seating decisions: assigned / displaced / promoted / released
 Notification outcomes: sent / blocked / uncertain / failed (counts only)
 
@@ -132,7 +304,6 @@ Retries and replays exercised:
 Failure and rollback exercised:
 Review-mode operator minutes:
 Autopilot operator minutes:
-Approximate Worker requests / D1 rows read and written:
 
 Release-blocking defects:
 Follow-up issue links:
@@ -142,3 +313,7 @@ Final result: PASS / FAIL
 The pilot is complete only when the visible Discord roster, private diagnostics,
 and D1-backed acceptance counts agree and every release-blocking defect has its
 own issue.
+
+After a PASS, continue with
+[Promote the tested bot to the real guild](real-guild-go-live.md). A passing test
+guild does not register commands or save configuration in the real guild.

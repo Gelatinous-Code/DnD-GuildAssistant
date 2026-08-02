@@ -149,9 +149,9 @@ function setupDashboard(config: GuildConfig | null): string {
     "## Guild Assistant setup",
     config
       ? "Your saved configuration is shown below. Supply only the options you want to change."
-      : "Nothing has been saved yet. Only `channel` is required; every other field has a safe default.",
+      : "Nothing has been saved yet. Only `channel` is required; confirm every built-in starting value.",
     "",
-    `${config?.eventChannelId ? "✅" : "❌"} **Operations channel:** ${
+    `${config?.eventChannelId ? "✅" : "❌"} **Workflow channel (signups, tables, built-in reminders):** ${
       config?.eventChannelId ? `<#${config.eventChannelId}>` : "choose a text channel"
     }`,
     `${config?.gmRoleId ? "✅" : "➖"} **Weekly GM role (optional):** ${
@@ -162,17 +162,19 @@ function setupDashboard(config: GuildConfig | null): string {
     `✅ **Tables:** ${config?.tableMinSize ?? 4} minimum / ${
       config?.tablePreferredSize ?? 6
     } preferred / ${config?.tableMaxSize ?? 6} maximum`,
+    `✅ **Signup window:** opens ${config?.signupOpenLeadDays ?? 7} days before; locks ${config?.signupLockLeadHours ?? 24} hours before`,
+    "**Table selection:** closes at game time; event duration is currently four hours",
     `${config?.reminderRoleId ? "✅" : "➖"} **Reminder role (optional):** ${
       config?.reminderRoleId ? `<@&${config.reminderRoleId}>` : "channel-only reminders are available"
     }`,
     `${config?.adminRoleId ? "✅" : "➖"} **Organizer escalation role (optional):** ${
       config?.adminRoleId ? `<@&${config.adminRoleId}>` : "skipped"
     }`,
-    `⏸️ **Automation mode:** ${config ? automationMode(config) : "paused"}`,
+    `${config?.schedulingEnabled ? "✅" : "⏸️"} **Automation mode:** ${config ? automationMode(config) : "paused"}`,
     "",
     config
-      ? "Next: run `/guild doctor`, then `/guild automation mode:Autopilot confirm:True` when ready."
-      : "Next: run `/guild setup channel:#your-channel`, then `/guild doctor`. Add a normal `Weekly GM` role only if you want automatic role assignment.",
+      ? "Next: run `/guild status`, then `/guild doctor`. Keep automation Paused for the test-guild pilot; the pilot enables Review and Autopilot at controlled points."
+      : "Next: run `/guild setup channel:#your-channel` to save these defaults, then `/guild status` and `/guild doctor`. Optional roles can be added later.",
   ].join("\n");
 }
 

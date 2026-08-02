@@ -1,5 +1,7 @@
 # Copy this file to .dev.vars. Never commit .dev.vars.
 DISCORD_APPLICATION_ID=1533171671886725293
 DISCORD_TEST_GUILD_ID=1533181439376494642
+# For one registration command, DISCORD_GUILD_ID overrides the test guild above.
+# DISCORD_GUILD_ID=paste_the_target_server_id_here
 DISCORD_PUBLIC_KEY=paste_the_public_key_from_discord_here
 DISCORD_BOT_TOKEN=paste_the_reset_bot_token_here

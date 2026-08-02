@@ -2,14 +2,19 @@ name: Register Discord commands
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - scripts/commands.mjs
-      - scripts/m6-commands.mjs
-      - scripts/register-commands.mjs
-      - .github/workflows/register-discord-commands.yml
+    inputs:
+      target_guild_id:
+        description: Discord Server ID that will receive these guild-scoped commands
+        required: true
+        type: string
+      deployed_ref:
+        description: Full commit SHA of the Worker deployment whose commands should be registered
+        required: true
+        type: string
+      deployment_verified:
+        description: Confirm the compatible Worker and D1 migrations are deployed
+        required: true
+        type: boolean
 
 permissions:
   contents: read
@@ -20,18 +25,47 @@ concurrency:
 
 jobs:
   register:
-    name: Register test-guild commands
+    name: Register target-guild commands
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: discord-command-registration
     steps:
-      - name: Check out repository
+      - name: Require deployment confirmation
+        if: ${{ !inputs.deployment_verified }}
+        run: |
+          echo "::error::Deploy the compatible Worker and D1 migrations before registering commands."
+          exit 1
+      - name: Check out trusted main history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: main
+          fetch-depth: 0
           persist-credentials: false
+      - name: Verify and select deployed commit
+        shell: bash
+        env:
+          DEPLOYED_REF: ${{ inputs.deployed_ref }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Run this workflow from the main branch."
+            exit 1
+          fi
+          if [[ ! "$DEPLOYED_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::deployed_ref must be a full 40-character commit SHA."
+            exit 1
+          fi
+          git cat-file -e "$DEPLOYED_REF^{commit}"
+          if ! git merge-base --is-ancestor "$DEPLOYED_REF" HEAD; then
+            echo "::error::deployed_ref must be on the trusted main-branch history. Use local registration for an unmerged test deployment."
+            exit 1
+          fi
+          git checkout --detach "$DEPLOYED_REF"
+      - name: Show registered commit
+        run: git rev-parse HEAD
       - name: Register commands
         run: node scripts/register-commands.mjs
         env:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_APPLICATION_ID: ${{ vars.DISCORD_APPLICATION_ID || '1533171671886725293' }}
-          DISCORD_TEST_GUILD_ID: ${{ vars.DISCORD_TEST_GUILD_ID || '1533181439376494642' }}
+          DISCORD_APPLICATION_ID: ${{ vars.DISCORD_APPLICATION_ID }}
+          DISCORD_GUILD_ID: ${{ inputs.target_guild_id }}
