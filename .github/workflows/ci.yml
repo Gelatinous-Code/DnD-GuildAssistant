@@ -28,7 +28,5 @@ jobs:
         run: npm run db:migrate:local
       - name: Reapply migrations (idempotency)
         run: npm run db:migrate:local
-      - name: Run tests
-        run: npm test
-      - name: Run type checks
-        run: npm run typecheck
+      - name: Run complete quality gate
+        run: npm run check

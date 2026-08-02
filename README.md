@@ -212,9 +212,10 @@ organization-owned with at least two maintainers so one volunteer's departure
 does not become a financial or access emergency.
 
 Read the [operations guide](docs/operations.md) for activation, failure recovery,
-retention, credential rotation, and maintainer handoff. The
-[GM priority policy](docs/gm-priority-policy.md) documents every deterministic
-tie and edge case.
+retention, credential rotation, and maintainer handoff. The existing
+[GM priority policy](docs/gm-priority-policy.md) documents deterministic GM
+selection, while the [DM priority token policy](docs/dm-priority-token-policy.md)
+defines completed-session rewards and priority player seats.
 
 ## Contributing and security
 
