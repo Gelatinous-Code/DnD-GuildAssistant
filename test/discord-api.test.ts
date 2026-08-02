@@ -62,6 +62,32 @@ describe("DiscordRestClient", () => {
     });
   });
 
+  it("keeps the default Worker fetch receiver attached to globalThis", async () => {
+    const receiverAwareFetch = vi.fn(function (
+      this: unknown,
+      _input: RequestInfo | URL,
+      _init?: RequestInit,
+    ): Promise<Response> {
+      expect(this).toBe(globalThis);
+      return Promise.resolve(
+        jsonResponse({ id: "900", channel_id: "200", content: "hello" }),
+      );
+    });
+    vi.stubGlobal("fetch", receiverAwareFetch as typeof fetch);
+
+    try {
+      const defaultClient = new DiscordRestClient(BOT_TOKEN, {
+        apiBaseUrl: `${API_BASE_URL}/`,
+      });
+
+      await defaultClient.sendChannelMessage("200", { content: "hello" });
+
+      expect(receiverAwareFetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("sends channel messages through API v10 with safe mentions", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ id: "900", channel_id: "200", content: "hello" }),

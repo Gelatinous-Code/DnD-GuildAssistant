@@ -304,7 +304,9 @@ export class DiscordRestClient {
       throw new TypeError("A Discord bot token is required");
     }
     this.#botToken = botToken;
-    this.#fetch = options.fetch ?? fetch;
+    this.#fetch =
+      options.fetch ??
+      ((input, init) => globalThis.fetch(input, init));
     this.#apiBaseUrl = (options.apiBaseUrl ?? DISCORD_API_BASE_URL).replace(/\/$/, "");
   }
 
