@@ -2175,7 +2175,7 @@ export class WeekService {
       !(eventId && event.status === "archived")
     ) {
       throw new UserFacingError(
-        "Only planned or published weeks can be archived. Use /week cancel for an unfinished week.",
+        "Only planned or published weeks can be archived. Use `/week cancel reason:<why> confirm:True` for an unfinished week.",
       );
     }
     const planBeforeArchive = await this.repository.getCurrentPlan(event.eventId);

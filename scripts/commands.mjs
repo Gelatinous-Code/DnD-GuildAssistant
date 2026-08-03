@@ -382,6 +382,12 @@ export const commands = [
             min_length: 3,
             max_length: 500,
           },
+          {
+            type: 5,
+            name: "confirm",
+            description: "Required: confirm this will stop and cancel the active week.",
+            required: true,
+          },
         ],
       },
       {

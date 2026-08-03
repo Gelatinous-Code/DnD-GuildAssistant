@@ -117,7 +117,7 @@ Pause scheduled transitions:
 /guild automation mode:Paused confirm:True
 ```
 
-Use `/week cancel` or `/week archive` only when it matches the active phase.
+Use `/week cancel reason:... confirm:True` or `/week archive` only when it matches the active phase.
 Keep D1 intact, resume the previous guild process, and give the maintainer the
 event ID plus sanitized `/week status` and `/guild doctor` output. Never repair
 production by editing D1 rows or bot messages directly.

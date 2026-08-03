@@ -50,4 +50,23 @@ describe("Discord command safety boundary", () => {
       }),
     ]);
   });
+  it("requires explicit confirmation to cancel a week", () => {
+    const week = commands.find((command: { name: string }) => command.name === "week");
+    const cancel = week?.options?.find(
+      (option: { name: string }) => option.name === "cancel",
+    );
+
+    expect(cancel?.options).toEqual([
+      expect.objectContaining({
+        name: "reason",
+        type: 3,
+        required: true,
+      }),
+      expect.objectContaining({
+        name: "confirm",
+        type: 5,
+        required: true,
+      }),
+    ]);
+  });
 });

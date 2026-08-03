@@ -1059,6 +1059,12 @@ async function handleWeekCommand(
     if (reason.replace(/[\r\n]+/g, " ").trim().length < 3) {
       throw new UserFacingError("reason must contain at least 3 characters.");
     }
+    if (booleanOption(invocation, "confirm") !== true) {
+      throw new UserFacingError(
+        "Cancellation was not confirmed, so nothing changed. Set confirm to True only when you intend to stop the active week. You can later redo an unfinished cancelled week with `/week restart confirm:True`.",
+      );
+    }
+
     const current = await repository.getCurrentWeeklyEvent(guildId);
     if (!current) throw new UserFacingError("There is no active week to cancel.");
     await cancelPriorityForEvent(

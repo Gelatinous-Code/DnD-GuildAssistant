@@ -2076,7 +2076,7 @@ describe("WeekService", () => {
     const instance = service(repository, discord);
 
     await expect(instance.archiveWeek("synthetic-guild", "admin-1")).rejects.toThrow(
-      "Only planned or published weeks can be archived. Use /week cancel for an unfinished week.",
+      "Only planned or published weeks can be archived. Use `/week cancel reason:<why> confirm:True` for an unfinished week.",
     );
     expect(repository.event.status).toBe("open");
     expect(repository.audits).toHaveLength(0);

@@ -46,7 +46,7 @@ These require **Manage Server**.
 | `/week export` | Download a private CSV snapshot for portability or backup. |
 | `/week retry` | Retry one failed open, lock, publish, reminder, or final-roster action. |
 | `/week skip` | Record that one scheduled occurrence should be skipped. |
-| `/week cancel` | Cancel a week with an audit reason. |
+| `/week cancel reason:... confirm:True` | Stop and cancel the active week. Both an audit reason and explicit confirmation are required. An unfinished cancelled occurrence can later be redone with `/week restart confirm:True`. |
 | `/week archive` | Close the completed week and finalize its audit history. |
 
 For `/week signup`, **GM** and **Player** corrections require **Tier 1**, **Tier
