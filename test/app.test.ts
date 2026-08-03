@@ -98,4 +98,55 @@ describe("deferred Discord interactions", () => {
       allowed_mentions: { parse: [] },
     });
   });
+
+  it("replaces a deferred command response when an async command handler fails", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ id: "302", channel_id: "400", content: "done" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    let background: Promise<unknown> | undefined;
+    const context = {
+      waitUntil(promise: Promise<unknown>) {
+        background = promise;
+      },
+    } as ExecutionContext;
+
+    const response = await handleDiscordInteraction(
+      {
+        id: "502",
+        application_id: "1533171671886725293",
+        token: "interaction-token",
+        type: 2,
+        guild_id: "1533181439376494642",
+        member: {
+          permissions: "32",
+          user: { id: "1533183019031199946", username: "Chappy" },
+        },
+        data: {
+          name: "guild",
+          options: [{ type: 1, name: "setup", options: [] }],
+        },
+      },
+      env,
+      context,
+    );
+
+    expect(await response.json()).toEqual({
+      type: 5,
+      data: { flags: 64 },
+    });
+    expect(background).toBeDefined();
+    await background;
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://discord.com/api/v10/webhooks/1533171671886725293/interaction-token/messages/@original",
+    );
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      content:
+        "⚠️ The assistant could not complete that action. An administrator can run /guild doctor and check Worker logs.",
+      allowed_mentions: { parse: [] },
+    });
+  });
 });

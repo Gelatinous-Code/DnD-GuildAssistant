@@ -416,9 +416,10 @@ export class DiscordRestClient {
     return this.#request("GET", `/guilds/${guildId}/members/${userId}`);
   }
 
-  getCurrentBotGuildMember(guildId: Snowflake): Promise<DiscordGuildMember> {
+  async getCurrentBotGuildMember(guildId: Snowflake): Promise<DiscordGuildMember> {
     requireSnowflake(guildId, "guildId");
-    return this.#request("GET", `/users/@me/guilds/${guildId}/member`);
+    const currentBot = await this.#request<DiscordUser>("GET", "/users/@me");
+    return this.getGuildMember(guildId, currentBot.id);
   }
 
   getGuildRoles(guildId: Snowflake): Promise<DiscordRole[]> {
