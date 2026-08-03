@@ -27,7 +27,7 @@ These require **Manage Server**.
 | `/guild setup` | Show the setup dashboard or change only the fields supplied; other guilds retain the generic one-channel setup. |
 | `/guild automation` | Choose Paused, Review, or Autopilot and optional reminders. |
 | `/guild status` | Show saved settings, automation mode, and the current week. |
-| `/guild doctor` | Check every configured channel, permission, and notification role. |
+| `/guild doctor` | Show the Worker command-schema version and check every configured channel, permission, and notification role. |
 
 ## Weekly event
 

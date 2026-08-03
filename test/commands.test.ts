@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 // The production registration script is JavaScript and intentionally has no
 // TypeScript declaration file.
 // @ts-expect-error importing the runtime command payload for regression coverage
-import { commands } from "../scripts/commands.mjs";
+import { commands, DISCORD_COMMAND_SCHEMA_VERSION } from "../scripts/commands.mjs";
 
 describe("Discord command safety boundary", () => {
   it("does not expose member-role management commands or options", () => {
@@ -81,5 +81,24 @@ describe("Discord command safety boundary", () => {
       .toLowerCase();
 
     expect(descriptions).not.toMatch(/weekly gm roles?|assistant-owned gm roles?|member roles?/);
+  });
+
+  it("exposes only supported week retry operations", () => {
+    const week = commands.find((command: { name: string }) => command.name === "week");
+    const retry = week?.options?.find(
+      (option: { name: string }) => option.name === "retry",
+    );
+    const step = retry?.options?.find(
+      (option: { name: string }) => option.name === "step",
+    );
+
+    expect(step?.choices?.map((choice: { value: string }) => choice.value)).toEqual([
+      "publish",
+      "open",
+      "lock",
+      "remind",
+      "finalize",
+    ]);
+    expect(DISCORD_COMMAND_SCHEMA_VERSION).toMatch(/^\d{4}\.\d{2}\.\d{2}\.\d+$/);
   });
 });
