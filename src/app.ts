@@ -1505,10 +1505,10 @@ async function executeDiscordInteraction(
       );
     }
     if (command === "help") return ephemeral(helpContent(interaction));
-    if (command === "guild") return handleGuildCommand(interaction, env);
-    if (command === "week") return handleWeekCommand(interaction, env);
-    if (command === "roles") return handleRolesCommand(interaction, env);
-    if (command === "reminder") return handleReminderCommand(interaction, env);
+    if (command === "guild") return await handleGuildCommand(interaction, env);
+    if (command === "week") return await handleWeekCommand(interaction, env);
+    if (command === "roles") return await handleRolesCommand(interaction, env);
+    if (command === "reminder") return await handleReminderCommand(interaction, env);
     const m6Response = await handleM6Command(interaction, env);
     if (m6Response !== null) return m6Response;
     return ephemeral("I don't recognize that command yet.");

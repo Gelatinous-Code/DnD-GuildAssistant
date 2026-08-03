@@ -162,7 +162,8 @@ describe("DiscordRestClient", () => {
   it("uses the member and role endpoints needed by reconciliation diagnostics", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ roles: ["30"], user: { id: "20", username: "GM" } }))
-      .mockResolvedValueOnce(jsonResponse({ roles: ["40"], user: { id: "10", username: "Bot" } }))
+      .mockResolvedValueOnce(jsonResponse({ id: "99", username: "Bot", bot: true }))
+      .mockResolvedValueOnce(jsonResponse({ roles: ["40"], user: { id: "99", username: "Bot" } }))
       .mockResolvedValueOnce(
         jsonResponse([
           {
@@ -183,7 +184,8 @@ describe("DiscordRestClient", () => {
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       `${API_BASE_URL}/guilds/10/members/20`,
-      `${API_BASE_URL}/users/@me/guilds/10/member`,
+      `${API_BASE_URL}/users/@me`,
+      `${API_BASE_URL}/guilds/10/members/99`,
       `${API_BASE_URL}/guilds/10/roles`,
     ]);
     expect(fetchMock.mock.calls.every(([, init]) => (init as RequestInit).method === "GET")).toBe(
