@@ -12,7 +12,7 @@ Discord does not expose another application's button interactions or private sta
 
 ## Decision
 
-Guild Assistant's native Discord signup controls and D1 records are authoritative for every week managed by Guild Assistant. The bot reads its own interaction payloads and persists each GM/player choice in D1. Table planning, assignments, role reconciliation, reminders, and audit history derive only from that state.
+Guild Assistant's native Discord signup controls and D1 records are authoritative for every week managed by Guild Assistant. The bot reads its own interaction payloads and persists each GM/player choice in D1. Table planning, assignments, reminders, and audit history derive only from that state. Member roles remain outside this boundary.
 
 Raid Helper remains supported alongside Guild Assistant:
 
@@ -21,7 +21,8 @@ Raid Helper remains supported alongside Guild Assistant:
 | Broad “who wants to game?” interest poll | Raid Helper may continue | Informational only; Guild Assistant does not scrape it. |
 | GM and player intent used for automatic planning | Guild Assistant native signup | D1 is authoritative. Running a duplicate Raid Helper poll does not synchronize it. |
 | Table sizing, GM rotation, draft, publication, and table choice | Guild Assistant | Derived from the locked native signup snapshot. |
-| Weekly GM role and role-aware reminders | Guild Assistant | Only configured resources and roles leased by Guild Assistant are changed. |
+| Member roles | Guild admins | Guild Assistant never assigns or removes member roles. |
+| Role-aware reminders | Guild Assistant | Only explicitly configured, mentionable roles may be notified. |
 | Portable roster snapshot | Guild Assistant `/week export` | Private, admin-only, formula-safe CSV for portability/backup; it is not a source of truth or a required weekly step. |
 | External spreadsheets | Guild admins, optionally | Outside the core workflow. Guild Assistant requires no Google credentials and performs no automatic Sheet synchronization. |
 | Other Raid Helper events/features | Raid Helper | No dependency or behavioral assumption is introduced. |
@@ -41,7 +42,7 @@ Times are evaluated in the configured IANA time zone. Defaults are shown; each g
 5. **Monday 17:00 — open seating:** signup-order protection ends. Any active player may claim remaining capacity first-come, first-served. A player who never chose a table is not penalized.
 6. **Tuesday 18:00 — finalize:** table controls close and the scheduler posts the final manifest. Drops are accepted until this boundary.
 7. **Tuesday 18:00–21:00 — play:** New Dawn's in-person games run for three hours; other guilds may configure another duration.
-8. **After play — archive:** the week becomes read-only operational history and assistant-owned role leases are released. No CSV or spreadsheet handoff is required.
+8. **After play — archive:** the week becomes read-only operational history. No role change, CSV, or spreadsheet handoff is required.
 
 ## Permissions and dependencies
 
@@ -55,7 +56,7 @@ Least privilege is feature-specific:
 
 - Native signups and publication require View Channels, Send Messages, Embed Links, and Read Message History in the configured channels.
 - Attach Files is optional and needed only in a channel where an admin invokes `/week export`.
-- Weekly role automation requires Manage Roles and places the bot's highest role above every configured managed role. The bot does not require Administrator.
+- Member role assignment is outside the product boundary. Do not grant the bot Manage Roles or Administrator.
 - A reminder can notify a role only when that role was explicitly configured and Discord permits the bot to mention it. `@everyone` and `@here` are always excluded.
 - Setup, planning overrides, publication, export, repair, and sensitive status output require Discord Administrator or Manage Guild.
 
@@ -64,7 +65,7 @@ Least privilege is feature-specific:
 - If Raid Helper is unavailable, nothing in the native weekly flow or Guild Assistant's private CSV export is blocked.
 - If Guild Assistant cannot reach Discord, D1 retains the intended transition and failed operation. An admin checks status before retrying; idempotency prevents a retry from creating a second transition or known message.
 - If D1 is unavailable, the bot must not infer state by parsing Discord messages. It returns a recoverable error and performs no publication or role removal.
-- Deleted channels/roles, missing permissions, and role-hierarchy failures are reported by `/guild doctor`; unrelated member roles remain untouched.
+- Deleted channels or notification roles and missing permissions are reported by `/guild doctor`; member roles remain untouched.
 - A bad or missing interaction signature is rejected before any state change.
 - Duplicate cron events and component retries reuse stable keys. They return or reconcile the existing result rather than append duplicate signups, plans, reminders, or role grants.
 
@@ -79,8 +80,7 @@ Adoption is deliberately reversible:
 5. **Optional later integration:** add only a documented API/export adapter behind the same D1 boundary. Imported rows must record their source and never bypass validation.
 
 To roll back, select paused automation, disable reminders, archive or cancel the
-open week, run a role-sync dry run and release only active Guild Assistant role
-leases, then resume Raid Helper GM/player polls. Preserve the archived D1 week
+open week, then resume Raid Helper GM/player polls. Preserve the archived D1 week
 until the guild confirms its attendance record or retention decision. No Raid
 Helper configuration must be reconstructed because Guild Assistant never
 mutates it.

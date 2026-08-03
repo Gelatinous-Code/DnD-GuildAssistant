@@ -17,8 +17,8 @@ Decide these things with the people who run game night:
 - when GM signup, player signup, tables, open seating, and game time happen; and
 - the smallest, preferred, and largest number of players at one table.
 
-Optional reminder and Weekly GM roles can wait. The basic workflow does not need
-them.
+Optional reminder and organizer-notification roles can wait. The assistant may
+mention configured roles, but member role assignment remains an admin task.
 
 ## Second Dawn: one-command setup
 
@@ -180,22 +180,11 @@ custom message or time, use `/reminder configure`; Discord will show a private
 preview before anything is sent. The bot rejects `@everyone`, `@here`, raw user
 mentions, and roles that were not chosen through the command field.
 
-## Optional: Weekly GM role
+## Member roles are managed by admins
 
-To give selected GMs a temporary role:
-
-1. Create a normal role such as `Weekly GM`.
-2. Give the bot **Manage Roles**.
-3. In **Server Settings → Roles**, move the bot's role above `Weekly GM`.
-4. Save it with `/guild setup gm_role:@Weekly GM`.
-5. Preview the result:
-
-   ```text
-   /roles sync dry_run:True
-   ```
-
-Use `dry_run:False` only when the preview is correct. The bot removes only role
-assignments it previously added; it leaves manual assignments alone.
+The Guild Assistant never assigns or removes Discord member roles. Do not grant
+it **Manage Roles**. If the guild wants a temporary `Weekly GM` role, server
+admins assign and remove that role using Discord's normal role tools.
 
 ## Choose how much the bot automates
 
@@ -208,12 +197,11 @@ assignments it previously added; it leaves manual assignments alone.
 For the first real week, start in Review:
 
 ```text
-/guild automation mode:Review before publish confirm:True role_sync:False
+/guild automation mode:Review before publish confirm:True
 ```
 
-Use `role_sync:True` only after the role preview passes. Add `reminders:True`
-only when you want the built-in reminder. A custom reminder should be configured
-separately and left unchanged when switching modes.
+Add `reminders:True` only when you want the built-in reminder. A custom reminder
+should be configured separately and left unchanged when switching modes.
 
 ## You are finished when
 
@@ -236,6 +224,6 @@ self-hosted installation should complete the
 | `/ping` does not answer | Ask the deployer to check the Worker, interaction endpoint, and Discord Public Key. |
 | The channel has a ❌ | Grant View Channel, Send Messages, Embed Links, and Read Message History there. |
 | A reminder role has a ❌ | Enable **Allow anyone to @mention this role**. |
-| The Weekly GM role has a ❌ | Grant Manage Roles and move the bot role above the Weekly GM role. |
+| Setup asks for Manage Roles | Do not grant it. Update to the latest Guild Assistant release and re-register the Discord commands; member roles are admin-managed. |
 | The schedule is wrong | Change only the incorrect day or time, then reopen `/guild setup`. |
 | Something is happening at the wrong time | Pause automation, run `/guild status`, and check the saved time zone and all five stages. |

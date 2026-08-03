@@ -550,39 +550,6 @@ export class DiscordRestClient {
     );
   }
 
-  async addMemberRole(
-    guildId: Snowflake,
-    userId: Snowflake,
-    roleId: Snowflake,
-    auditLogReason?: string,
-  ): Promise<void> {
-    requireSnowflake(guildId, "guildId");
-    requireSnowflake(userId, "userId");
-    requireSnowflake(roleId, "roleId");
-    await this.#request(
-      "PUT",
-      `/guilds/${guildId}/members/${userId}/roles/${roleId}`,
-      undefined,
-      auditLogReason,
-    );
-  }
-
-  async removeMemberRole(
-    guildId: Snowflake,
-    userId: Snowflake,
-    roleId: Snowflake,
-    auditLogReason?: string,
-  ): Promise<void> {
-    requireSnowflake(guildId, "guildId");
-    requireSnowflake(userId, "userId");
-    requireSnowflake(roleId, "roleId");
-    await this.#request(
-      "DELETE",
-      `/guilds/${guildId}/members/${userId}/roles/${roleId}`,
-      undefined,
-      auditLogReason,
-    );
-  }
 }
 
 function escapeMarkdown(value: string): string {

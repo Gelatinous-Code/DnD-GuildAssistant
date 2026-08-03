@@ -164,8 +164,8 @@ An organizer correction through `/week signup` is audited and regenerates or
 supersedes the plan. Compatible table choices carry forward; incompatible ones
 return to a deterministic waitlist or organizer review.
 
-Optional role reconciliation must change only bot-owned leases. Optional
-reminders must allow at most one successful send per scheduled occurrence unless
+Member roles are never changed by the assistant. Optional reminders must allow
+at most one successful send per scheduled occurrence unless
 an administrator explicitly confirms a resend.
 
 ## Incident recovery
@@ -203,7 +203,7 @@ week.
 | A scheduled open, lock, or final roster was missed | Fix the schedule/trigger problem, inspect `/week status`, then retry only that supported step. |
 | Publication timed out | Check the stored publication and target channel, then repeat `/week publish`; do not create messages manually. |
 | A reminder failed | Fix its channel or permission, then retry the same occurrence. Use intentional resend only for a deliberate second message. |
-| A role change returns 403 | Fix Manage Roles or role order, preview `/roles sync dry_run:True`, then apply or retry. Do not clear leases. |
+| A member role needs changing | A server admin changes it in Discord. The Guild Assistant never assigns or removes member roles. |
 | D1 reports a missing table | Confirm the binding and remote migration list before retrying. |
 | A final roster is missing | Restore channel permissions, inspect status, and retry only finalization. |
 | A member's token message is missing | Check `/priority-admin diagnose`; message delivery does not create or erase the token. |
@@ -247,7 +247,7 @@ export.
 | Signups, plans, assignments, GM history, attendance, rewards, and seating decisions | 13 months |
 | Audit metadata and publication revisions | 13 months |
 | Completed operation request/result payloads | 90 days |
-| Released role leases | 90 days |
+| Retired legacy role-lease records | 90 days |
 | Reminder/DM delivery content and failure text | 30 days |
 | Cloudflare logs | Shortest practical setting; at most 30 days for the MVP |
 

@@ -149,4 +149,47 @@ describe("deferred Discord interactions", () => {
       allowed_mentions: { parse: [] },
     });
   });
+
+  it("refuses a legacy roles command without attempting a role mutation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ id: "303", channel_id: "400", content: "done" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    let background: Promise<unknown> | undefined;
+    const context = {
+      waitUntil(promise: Promise<unknown>) {
+        background = promise;
+      },
+    } as ExecutionContext;
+
+    const response = await handleDiscordInteraction(
+      {
+        id: "503",
+        application_id: "1533171671886725293",
+        token: "interaction-token",
+        type: 2,
+        guild_id: "1533181439376494642",
+        data: {
+          name: "roles",
+          options: [{ type: 1, name: "sync", options: [] }],
+        },
+      },
+      env,
+      context,
+    );
+
+    expect(await response.json()).toEqual({
+      type: 5,
+      data: { flags: 64 },
+    });
+    expect(background).toBeDefined();
+    await background;
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      content:
+        "🛡️ Member roles are managed by server admins. This assistant never changes them.",
+      allowed_mentions: { parse: [] },
+    });
+  });
 });

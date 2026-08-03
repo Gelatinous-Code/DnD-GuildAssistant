@@ -25,9 +25,9 @@ These require **Manage Server**.
 | --- | --- |
 | `/guild setup preset:Second Dawn Guild` | Discover Second Dawn's existing GM/player channels and permanent audience roles in one step. |
 | `/guild setup` | Show the setup dashboard or change only the fields supplied; other guilds retain the generic one-channel setup. |
-| `/guild automation` | Choose Paused, Review, or Autopilot and optional reminders or role sync. |
+| `/guild automation` | Choose Paused, Review, or Autopilot and optional reminders. |
 | `/guild status` | Show saved settings, automation mode, and the current week. |
-| `/guild doctor` | Check every configured channel, permissions, notification role, and managed-role order. |
+| `/guild doctor` | Check every configured channel, permission, and notification role. |
 
 ## Weekly event
 
@@ -75,7 +75,6 @@ These require **Manage Server**.
 | --- | --- |
 | `/reminder configure` | Save or disable the reminder rule and show a private preview. |
 | `/reminder send` | Send the configured reminder now; a deliberate duplicate requires confirmation. |
-| `/roles sync` | Preview or apply changes to the optional Weekly GM role. |
 
 For the ordinary operating sequence, use the [organizer guide](organizer-guide.md).
 For recovery behavior and safe retry rules, use the

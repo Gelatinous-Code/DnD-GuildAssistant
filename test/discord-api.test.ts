@@ -428,21 +428,9 @@ describe("DiscordRestClient", () => {
     });
   });
 
-  it("adds and removes roles and URL-encodes the audit log reason", async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-
-    await client.addMemberRole("10", "20", "30", "Weekly GM — table 1");
-    await client.removeMemberRole("10", "20", "30", "Weekly GM ended");
-
-    const [addUrl, addInit] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const [removeUrl, removeInit] = fetchMock.mock.calls[1] as [string, RequestInit];
-    expect(addUrl).toBe(`${API_BASE_URL}/guilds/10/members/20/roles/30`);
-    expect(addInit.method).toBe("PUT");
-    expect(new Headers(addInit.headers).get("x-audit-log-reason")).toBe(
-      "Weekly%20GM%20%E2%80%94%20table%201",
-    );
-    expect(removeUrl).toBe(`${API_BASE_URL}/guilds/10/members/20/roles/30`);
-    expect(removeInit.method).toBe("DELETE");
+  it("does not expose Discord member role mutation methods", () => {
+    expect("addMemberRole" in client).toBe(false);
+    expect("removeMemberRole" in client).toBe(false);
   });
 
   it("bounds Discord rate-limit retries at three attempts", async () => {

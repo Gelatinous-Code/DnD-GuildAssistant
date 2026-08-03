@@ -102,7 +102,6 @@ function callbacks(): SchedulerCallbacks {
     lockAndPlanEvent: vi.fn().mockResolvedValue(undefined),
     publishEvent: vi.fn().mockResolvedValue(undefined),
     openSeating: vi.fn().mockResolvedValue(undefined),
-    syncRoles: vi.fn().mockResolvedValue(undefined),
     finalizeEvent: vi.fn().mockResolvedValue(undefined),
     archiveEvent: vi.fn().mockResolvedValue(undefined),
     enqueueEventReminders: vi.fn().mockResolvedValue(undefined),
@@ -483,21 +482,16 @@ describe("scheduled orchestration", () => {
 
     const report = await runScheduledTick(repository, handler, now);
 
-    expect(handler.syncRoles).toHaveBeenCalledWith(published);
     expect(handler.finalizeEvent).toHaveBeenCalledWith(published);
     expect(handler.archiveEvent).toHaveBeenCalledWith(published);
-    expect(repository.beginOperation).toHaveBeenCalledWith(expect.objectContaining({
-      operationKey: "scheduler:roles:event-100:plan-100",
-      eventId: published.eventId,
-    }));
     expect(repository.beginOperation).toHaveBeenCalledWith(expect.objectContaining({
       operationKey: "scheduler:finalize:event-100:plan-100:0",
       eventId: published.eventId,
     }));
     const lifecycle = report.actions
-      .filter(({ action }) => ["roles", "finalize", "archive"].includes(action))
+      .filter(({ action }) => ["finalize", "archive"].includes(action))
       .map(({ action }) => action);
-    expect(lifecycle).toEqual(expect.arrayContaining(["roles", "finalize", "archive"]));
+    expect(lifecycle).toEqual(expect.arrayContaining(["finalize", "archive"]));
     expect(lifecycle.indexOf("finalize")).toBeLessThan(lifecycle.indexOf("archive"));
   });
 
@@ -683,7 +677,6 @@ describe("scheduled orchestration", () => {
     expect(handler.openEvent).not.toHaveBeenCalled();
     expect(handler.lockAndPlanEvent).not.toHaveBeenCalled();
     expect(handler.publishEvent).not.toHaveBeenCalled();
-    expect(handler.syncRoles).not.toHaveBeenCalled();
     expect(handler.finalizeEvent).not.toHaveBeenCalled();
     expect(handler.archiveEvent).not.toHaveBeenCalled();
     expect(handler.deliverReminder).not.toHaveBeenCalled();

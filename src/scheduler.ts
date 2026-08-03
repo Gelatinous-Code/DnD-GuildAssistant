@@ -39,7 +39,6 @@ export interface SchedulerCallbacks {
   lockAndPlanEvent(event: WeeklyEvent): Promise<void>;
   publishEvent(event: WeeklyEvent): Promise<void>;
   openSeating(event: WeeklyEvent): Promise<void>;
-  syncRoles(event: WeeklyEvent): Promise<void>;
   finalizeEvent(event: WeeklyEvent): Promise<void>;
   archiveEvent(event: WeeklyEvent): Promise<void>;
   enqueueEventReminders(event: WeeklyEvent): Promise<void>;
@@ -54,7 +53,6 @@ export interface ScheduledActionResult {
     | "lock-plan"
     | "publish"
     | "open-seating"
-    | "roles"
     | "finalize"
     | "archive"
     | "reminder";
@@ -146,7 +144,7 @@ async function captureUnpersisted(
 }
 
 export function schedulerOperationKey(
-  action: "create" | "open" | "player-open" | "lock-plan" | "publish" | "open-seating" | "roles" | "finalize" | "archive",
+  action: "create" | "open" | "player-open" | "lock-plan" | "publish" | "open-seating" | "finalize" | "archive",
   entityId: string,
 ): string {
   return `scheduler:${action}:${entityId}`;
@@ -163,7 +161,7 @@ type PersistedCaptureResult = "completed" | "busy" | "failed";
 async function capturePersisted(
   repository: SchedulerRepository,
   actions: ScheduledActionResult[],
-  action: "create" | "open" | "player-open" | "lock-plan" | "publish" | "open-seating" | "roles" | "finalize" | "archive",
+  action: "create" | "open" | "player-open" | "lock-plan" | "publish" | "open-seating" | "finalize" | "archive",
   entityId: string,
   guildId: string,
   eventId: string | undefined,
@@ -427,22 +425,6 @@ export async function runScheduledTick(
 
       const currentPlan = await repository.getCurrentPlan(event.eventId);
       const publishedPlan = currentPlan?.status === "published" ? currentPlan : null;
-
-      if (config.roleSyncEnabled && publishedPlan) {
-        const rolesEntityId = `${event.eventId}:${publishedPlan.planId}`;
-        await capturePersisted(
-          repository,
-          actions,
-          "roles",
-          rolesEntityId,
-          event.guildId,
-          event.eventId,
-          now,
-          async () => {
-            await callbacks.syncRoles(event);
-          },
-        );
-      }
 
       let finalization: PersistedCaptureResult = publishedPlan ? "completed" : "failed";
       const finalizationDue =
