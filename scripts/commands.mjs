@@ -354,7 +354,7 @@ export const commands = [
       {
         type: 1,
         name: "archive",
-        description: "Archive the current week without changing member roles.",
+        description: "Archive the current week.",
       },
       {
         type: 1,

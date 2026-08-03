@@ -69,4 +69,17 @@ describe("Discord command safety boundary", () => {
       }),
     ]);
   });
+
+  it("does not describe weekly commands as managing member roles", () => {
+    const week = commands.find((command: { name: string }) => command.name === "week");
+    const descriptions = [
+      week?.description,
+      ...(week?.options?.map((option: { description?: string }) => option.description) ?? []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    expect(descriptions).not.toMatch(/weekly gm roles?|assistant-owned gm roles?|member roles?/);
+  });
 });
