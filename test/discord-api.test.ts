@@ -681,6 +681,35 @@ describe("Discord message rendering", () => {
     expect(archived.components).toEqual([]);
   });
 
+  it("keeps only withdrawal available after signup choices lock", () => {
+    const locked = renderSignupMessage({
+      eventId: "event-1",
+      title: "Games",
+      startsAt,
+      status: "locked",
+      audience: "gm",
+      gmSignupEnabled: false,
+      withdrawEnabled: true,
+      tierSignups: [
+        { gameTier: 1, gmNames: ["GM One"], playerNames: [] },
+        { gameTier: 2, gmNames: [], playerNames: [] },
+        { gameTier: 3, gmNames: [], playerNames: [] },
+      ],
+    });
+
+    expect(locked.components?.[0]?.components.map((button) => ({
+      label: button.label,
+      disabled: button.disabled,
+    }))).toEqual([
+      { label: "Run T1", disabled: true },
+      { label: "Run T2", disabled: true },
+      { label: "Run T3", disabled: true },
+      { label: "Backup GM", disabled: true },
+      { label: "Withdraw", disabled: false },
+    ]);
+    expect(locked.embeds?.[0]?.footer?.text).toContain("Withdraw only");
+  });
+
   it("renders a plan preview with table balance, waitlist, and warnings", () => {
     const preview = renderPlanPreview({
       planId: "plan-1",

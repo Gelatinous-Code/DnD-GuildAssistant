@@ -31,6 +31,7 @@ function guildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     reminderChannelId: "reminders-channel",
     adminRoleId: "admin-role",
     gmRoleId: "gm-role",
+    gmNotificationRoleId: null,
     reminderRoleId: "gaming-role",
     timezone: "America/Denver",
     weeklyDay: 6,
@@ -829,10 +830,34 @@ describe("WeekService", () => {
       signupMessageId: "message-1",
     });
   });
+
+  it("mentions the GM role only when the combined signup post is first created", async () => {
+    const repository = new FakeRepository();
+    repository.config = guildConfig({ gmNotificationRoleId: "401" });
+    const discord = new FakeDiscord();
+    const instance = service(repository, discord, ["event-new"]);
+
+    await instance.openWeek({
+      guildId: "synthetic-guild",
+      startsAt: "2026-08-08T00:30:00Z",
+      actorUserId: "admin-1",
+    });
+    await instance.openWeek({ guildId: "synthetic-guild" });
+
+    expect(discord.sends[0]?.payload.content).toContain("<@&401>");
+    expect(discord.sends[0]?.payload.allowed_mentions?.roles).toEqual(["401"]);
+    expect(discord.edits).toHaveLength(1);
+    expect(discord.edits[0]?.payload.content).toBeUndefined();
+    expect(discord.edits[0]?.payload.allowed_mentions?.roles).toEqual([]);
+  });
+
   it("routes staged GM and player cards to their configured channels", async () => {
     const repository = new FakeRepository();
     const playerSignupOpensAt = NOW + 60 * 60_000;
-    repository.config = guildConfig({ gmSignupChannelId: "gm-sign-up-channel" });
+    repository.config = guildConfig({
+      gmSignupChannelId: "gm-sign-up-channel",
+      gmNotificationRoleId: "401",
+    });
     repository.event = weeklyEvent("open", {
       playerSignupOpensAt,
       signupChannelId: null,
@@ -846,11 +871,12 @@ describe("WeekService", () => {
 
     expect(discord.sends).toHaveLength(1);
     expect(discord.sends[0]?.channelId).toBe("gm-sign-up-channel");
+    expect(discord.sends[0]?.payload.content).toContain("<@&401> **GM signup is now open.**");
     expect(discord.sends[0]?.payload.components?.[0]?.components.map(
       (button) => button.label,
     )).toEqual(["Run T1", "Run T2", "Run T3", "Backup GM", "Withdraw"]);
     expect(discord.sends[0]?.payload.allowed_mentions).toEqual({
-      parse: [], roles: [], users: [], replied_user: false,
+      parse: [], roles: ["401"], users: [], replied_user: false,
     });
     expect(repository.event).toMatchObject({
       gmSignupChannelId: "gm-sign-up-channel",
@@ -864,6 +890,9 @@ describe("WeekService", () => {
 
     expect(discord.sends).toHaveLength(2);
     expect(discord.sends[1]?.channelId).toBe("events-channel");
+    expect(discord.sends[1]?.payload.allowed_mentions).toEqual({
+      parse: [], roles: [], users: [], replied_user: false,
+    });
     expect(discord.sends[1]?.payload.components?.[0]?.components.map(
       (button) => button.label,
     )).toEqual(["Play T1", "Play T2", "Play T3", "Withdraw"]);
@@ -916,6 +945,55 @@ describe("WeekService", () => {
       "signup.player",
       "signup.withdraw",
     ]);
+  });
+
+  it.each(["locked", "planned"] as const)(
+    "keeps GM withdrawal available while a %s week awaits publication",
+    async (status) => {
+      const repository = new FakeRepository();
+      repository.event = weeklyEvent(status);
+      repository.signups.set("gm-1", signup("gm-1", "gm"));
+      const instance = service(repository, new FakeDiscord());
+
+      const card = await instance.signupPayload(repository.event, "gm");
+      expect(card.components?.[0]?.components.map((button) => ({
+        label: button.label,
+        disabled: button.disabled,
+      }))).toEqual([
+        { label: "Run T1", disabled: true },
+        { label: "Run T2", disabled: true },
+        { label: "Run T3", disabled: true },
+        { label: "Backup GM", disabled: true },
+        { label: "Withdraw", disabled: false },
+      ]);
+
+      await expect(instance.changeSignup({
+        guildId: "synthetic-guild",
+        eventId: "event-1",
+        userId: "gm-1",
+        displayName: "GM One",
+        action: "withdraw",
+      })).resolves.toMatchObject({ message: "You dropped from this week's games." });
+      expect(repository.signups.get("gm-1")?.status).toBe("withdrawn");
+    },
+  );
+
+  it("closes locked-week withdrawal when the game starts", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("locked");
+    repository.signups.set("gm-1", signup("gm-1", "gm"));
+    const instance = service(repository, new FakeDiscord(), [], STARTS_AT);
+
+    const card = await instance.signupPayload(repository.event, "gm");
+    expect(card.components?.[0]?.components.at(-1)?.disabled).toBe(true);
+    await expect(instance.changeSignup({
+      guildId: "synthetic-guild",
+      eventId: "event-1",
+      userId: "gm-1",
+      displayName: "GM One",
+      action: "withdraw",
+    })).rejects.toThrow("Self-service withdrawal is closed");
+    expect(repository.signups.get("gm-1")?.status).toBe("active");
   });
 
   it("rejects a signup interaction replayed from a different guild", async () => {

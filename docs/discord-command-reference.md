@@ -43,10 +43,10 @@ These require **Manage Server**.
 | `/week override` | Change one draft table's name, capacity, or active eligible GM with a reason. |
 | `/week publish` | Publish or safely reconcile the current reviewed draft. |
 | `/week export` | Download a private CSV snapshot for portability or backup. |
-| `/week retry` | Retry one failed open, lock, publish, reminder, role, or final-roster action. |
+| `/week retry` | Retry one failed open, lock, publish, reminder, or final-roster action. |
 | `/week skip` | Record that one scheduled occurrence should be skipped. |
 | `/week cancel` | Cancel a week with an audit reason. |
-| `/week archive` | Close the completed week and reconcile bot-owned roles. |
+| `/week archive` | Close the completed week and finalize its audit history. |
 
 For `/week signup`, **GM** and **Player** corrections require **Tier 1**, **Tier
 2**, or **Tier 3**. **Backup GM** records emergency coverage without adding a
@@ -67,12 +67,15 @@ These require **Manage Server**.
 | `/priority-admin refund` | Make an exceptional confirmed token refund. |
 | `/priority-admin configure` | Set or disable the private pre-expiration reminder. |
 
-## Optional reminders and roles
+## Optional notifications
 
 These require **Manage Server**.
 
 | Command | Purpose |
 | --- | --- |
+| `/guild setup gm_notification_role:@GM` | Mention the chosen role once when GM signup opens. |
+| `/guild setup reminder_role:@Guild Player` | Choose the player audience used by signup reminders. |
+| `/guild setup admin_role:@Administrator` | Choose the organizer audience for capacity-risk alerts. |
 | `/reminder configure` | Save or disable the reminder rule and show a private preview. |
 | `/reminder send` | Send the configured reminder now; a deliberate duplicate requires confirmation. |
 

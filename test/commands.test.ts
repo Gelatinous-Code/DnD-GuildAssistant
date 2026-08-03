@@ -21,6 +21,12 @@ describe("Discord command safety boundary", () => {
     expect(setup?.options?.map((option: { name: string }) => option.name)).not.toContain(
       "clear_gm_role",
     );
+    expect(setup?.options?.map((option: { name: string }) => option.name)).toContain(
+      "gm_notification_role",
+    );
+    expect(setup?.options?.map((option: { name: string }) => option.name)).toContain(
+      "clear_gm_notification_role",
+    );
     expect(
       automation?.options?.map((option: { name: string }) => option.name),
     ).not.toContain("role_sync");

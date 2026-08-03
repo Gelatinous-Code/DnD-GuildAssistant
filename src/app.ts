@@ -3,6 +3,7 @@ import {
   discordTimestamp,
   safeAllowedMentions,
   type DiscordMessagePayload,
+  type DiscordRole,
 } from "./discord-api";
 import {
   InteractionResponseType,
@@ -138,6 +139,33 @@ function automationMode(config: Pick<GuildConfig, "schedulingEnabled" | "autoPub
   return config.autoPublishEnabled ? "autopilot" : "review before publish";
 }
 
+export function diagnoseNotificationRoles(
+  config: Pick<GuildConfig, "gmNotificationRoleId" | "reminderRoleId" | "adminRoleId">,
+  guildRoles: readonly DiscordRole[],
+): string[] {
+  const configuredRoles: ReadonlyArray<readonly [string, string | null]> = [
+    ["GM signup notification role", config.gmNotificationRoleId],
+    ["Player reminder role", config.reminderRoleId],
+    ["Organizer escalation role", config.adminRoleId],
+  ];
+  return configuredRoles.flatMap(([label, roleId]) => {
+    if (!roleId) return ["➖ **" + label + "** — optional and not configured."];
+    const role = guildRoles.find((candidate) => candidate.id === roleId);
+    if (!role) {
+      return [
+        "❌ **" + label + "** — configured role " + roleId + " is missing. Re-run /guild setup.",
+      ];
+    }
+    return [
+      (role.mentionable ? "✅" : "❌") +
+        " **" + label + "** — @" + role.name +
+        (role.mentionable
+          ? " exists and is mentionable."
+          : " exists but cannot notify members. Enable “Allow anyone to @mention this role”."),
+    ];
+  });
+}
+
 function setupDashboard(config: GuildConfig | null): string {
   const timezone = config?.timezone ?? NEW_DAWN_CADENCE.timeZone;
   const weeklyDay = config?.weeklyDay ?? NEW_DAWN_CADENCE.game.weekday;
@@ -181,8 +209,10 @@ function setupDashboard(config: GuildConfig | null): string {
     "**Player capacity:** each tier reserves its own seats in signup order. Extra players wait within that tier.",
     "**Drops:** before open seating, the first waitlisted player in the same tier inherits the reservation and receives a private message.",
     "**No table chosen:** no penalty; at open seating, every remaining spot is first-come until game time.",
-    "🛡️ **Member roles:** managed by server admins; the assistant never assigns or removes them.",
-    `${config?.reminderRoleId ? "✅" : "➖"} **Reminder role (optional):** ${
+    `${config?.gmNotificationRoleId ? "✅" : "➖"} **GM signup notification role (optional):** ${
+      config?.gmNotificationRoleId ? `<@&${config.gmNotificationRoleId}>` : "channel-only GM signup announcements"
+    }`,
+    `${config?.reminderRoleId ? "✅" : "➖"} **Player reminder role (optional):** ${
       config?.reminderRoleId ? `<@&${config.reminderRoleId}>` : "channel-only reminders are available"
     }`,
     `${config?.adminRoleId ? "✅" : "➖"} **Organizer escalation role (optional):** ${
@@ -467,8 +497,9 @@ function setupSummary(config: GuildConfig): string {
     "**Table sizes:** " + config.tableMinSize + " / " +
       config.tablePreferredSize + " / " + config.tableMaxSize,
     "**Player capacity:** signup-order reservations and waitlists are separate for each tier, followed by first-come open seating within that tier.",
-    "**Member roles:** admin-managed; the assistant never changes them",
-    "**Reminder role:** " +
+    "**GM signup notification role:** " +
+      (config.gmNotificationRoleId ? "<@&" + config.gmNotificationRoleId + ">" : "not set"),
+    "**Player reminder role:** " +
       (config.reminderRoleId ? "<@&" + config.reminderRoleId + ">" : "not set"),
     "**Automation:** " + automationMode(config),
   ].join("\n");
@@ -529,11 +560,18 @@ async function handleGuildCommand(
 
     const selectedReminderRoleId =
       stringOption(invocation, "reminder_role") ?? presetRouting?.playerReminderRoleId;
+    const selectedGmNotificationRoleId =
+      stringOption(invocation, "gm_notification_role") ?? presetRouting?.gmNotificationRoleId;
     const selectedAdminRoleId = stringOption(invocation, "admin_role") ?? presetRouting?.adminRoleId;
     const clearReminderRole = booleanOption(invocation, "clear_reminder_role") === true;
+    const clearGmNotificationRole =
+      booleanOption(invocation, "clear_gm_notification_role") === true;
     const clearAdminRole = booleanOption(invocation, "clear_admin_role") === true;
     if (clearReminderRole && selectedReminderRoleId) {
       throw new UserFacingError("Choose reminder_role or clear_reminder_role, not both.");
+    }
+    if (clearGmNotificationRole && selectedGmNotificationRoleId) {
+      throw new UserFacingError("Choose gm_notification_role or clear_gm_notification_role, not both.");
     }
     if (clearAdminRole && selectedAdminRoleId) {
       throw new UserFacingError("Choose admin_role or clear_admin_role, not both.");
@@ -596,6 +634,7 @@ async function handleGuildCommand(
       reminderChannelId: selectedChannelId,
       gmRoleId: null,
       adminRoleId: clearAdminRole ? null : selectedAdminRoleId,
+      gmNotificationRoleId: clearGmNotificationRole ? null : selectedGmNotificationRoleId,
       reminderRoleId: clearReminderRole ? null : selectedReminderRoleId,
       timezone,
       weeklyDay,
@@ -630,8 +669,8 @@ async function handleGuildCommand(
       setupSummary(config) +
         (presetRouting
           ? "\n**Second Dawn preset:** GM signups route to <#" +
-            presetRouting.gmSignupChannelId + ">; the permanent GM role <@&" +
-            presetRouting.verifiedGmRoleId + "> remains managed by Discord channel access.\n"
+            presetRouting.gmSignupChannelId + "> and notify <@&" +
+            presetRouting.gmNotificationRoleId + "> when signup opens.\n"
           : "") +
         (problems.length
           ? "\n\n**Setup checks:**\n" + problems.join("\n")
@@ -701,9 +740,8 @@ async function handleGuildCommand(
     });
     return ephemeral(
       `${mode === "paused" ? "⏸️" : "✅"} Automation mode is now **${automationMode(saved)}**.\n` +
-        "Member roles remain admin-managed and are never changed by the assistant." +
         (reminderEnabled === undefined
-          ? " Reminder configuration was unchanged."
+          ? "Reminder configuration was unchanged."
           : ` Default reminders are **${reminderEnabled ? "on" : "off"}**.`),
     );
   }
@@ -769,28 +807,7 @@ async function handleGuildCommand(
         "** — " +
         check.detail,
     );
-    const notificationRoleResults = [
-      ["Reminder role", config.reminderRoleId],
-      ["Organizer escalation role", config.adminRoleId],
-    ].flatMap(([label, roleId]) => {
-      if (!roleId) return ["➖ **" + label + "** — optional and not configured."];
-      const role = guildRoles.find((candidate) => candidate.id === roleId);
-      if (!role) {
-        return [
-          "❌ **" + label + "** — configured role " + roleId + " is missing. Re-run /guild setup.",
-        ];
-      }
-      return [
-        (role.mentionable ? "✅" : "❌") +
-          " **" +
-          label +
-          "** — @" +
-          role.name +
-          (role.mentionable
-            ? " exists and is mentionable."
-            : " exists but cannot notify members. Enable “Allow anyone to @mention this role”."),
-      ];
-    });
+    const notificationRoleResults = diagnoseNotificationRoles(config, guildRoles);
     const coreProblems = await coreAutomationProblems(discord, guildId, config);
     const coreReady = coreProblems.length === 0 && channelChecks.every((check) => check.ready);
     return ephemeral(
@@ -807,7 +824,6 @@ async function handleGuildCommand(
         config.autoPublishEnabled
           ? "✅ **Automatic publishing:** on."
           : "➖ **Automatic publishing:** off; an organizer reviews and runs /week publish.",
-        "🛡️ **Member roles:** admin-managed; the assistant cannot assign or remove them.",
         "",
         "**Configured resources**",
         ...channelChecks.map((check) => check.text),
@@ -963,8 +979,7 @@ async function handleWeekCommand(
       "✅ Published " +
         result.bundle.tables.length +
         " tables." +
-        (result.links.length ? "\n" + result.links.join("\n") : "") +
-        "\nMember roles remain admin-managed.",
+        (result.links.length ? "\n" + result.links.join("\n") : ""),
     );
   }
   if (invocation.subcommand === "export") {
@@ -1023,7 +1038,7 @@ async function handleWeekCommand(
     const current = await repository.getCurrentWeeklyEvent(guildId);
     if (current) await settlePriorityForEvent(env, current);
     await week.archiveWeek(guildId, actorUserId);
-    return ephemeral("📦 Week archived. Member roles were not changed.");
+    return ephemeral("📦 Week archived.");
   }
   if (invocation.subcommand === "cancel") {
     const reason = stringOption(invocation, "reason") ?? "";
@@ -1036,7 +1051,7 @@ async function handleWeekCommand(
       env, current, actorUserId ?? interaction.id ?? "discord-interaction", reason);
     const event = await week.cancelWeek(guildId, actorUserId, reason);
     return ephemeral(
-      "🛑 Cancelled **" + event.title + "**. Member roles were not changed.",
+      "🛑 Cancelled **" + event.title + "**.",
     );
   }
   if (invocation.subcommand === "retry") {
@@ -1374,7 +1389,7 @@ async function executeDiscordInteraction(
     if (command === "week") return await handleWeekCommand(interaction, env);
     if (command === "roles") {
       return ephemeral(
-        "🛡️ Member roles are managed by server admins. This assistant never changes them.",
+        "This command has been retired. Ask a server admin if you need a role change.",
       );
     }
     if (command === "reminder") return await handleReminderCommand(interaction, env);

@@ -65,7 +65,12 @@ export const commands = [
           {
             type: 8,
             name: "reminder_role",
-            description: "Optional role that scheduled signup reminders may mention.",
+            description: "Optional player role that scheduled signup reminders may mention.",
+          },
+          {
+            type: 8,
+            name: "gm_notification_role",
+            description: "Optional GM role mentioned when GM signup opens.",
           },
           {
             type: 8,
@@ -171,7 +176,12 @@ export const commands = [
           {
             type: 5,
             name: "clear_reminder_role",
-            description: "Clear the optional reminder audience role.",
+            description: "Clear the optional player reminder role.",
+          },
+          {
+            type: 5,
+            name: "clear_gm_notification_role",
+            description: "Clear the optional GM signup notification role.",
           },
           {
             type: 5,

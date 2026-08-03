@@ -26,8 +26,8 @@ describe("D1 migrations", () => {
     const eventColumns = await env.DB.prepare("PRAGMA table_info(weekly_events)")
       .all<{ name: string }>();
 
-    expect(guildColumns.results.map((column) => column.name)).toContain(
-      "gm_signup_channel_id",
+    expect(guildColumns.results.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["gm_signup_channel_id", "gm_notification_role_id"]),
     );
     expect(eventColumns.results.map((column) => column.name)).toEqual(
       expect.arrayContaining([
@@ -43,11 +43,13 @@ describe("D1 migrations", () => {
       guildId: "routing-guild",
       eventChannelId: "player-channel",
       gmSignupChannelId: "gm-channel",
+      gmNotificationRoleId: "gm-notification-role",
       tableChannelId: "player-channel",
       reminderChannelId: "player-channel",
     });
 
     expect(config.gmSignupChannelId).toBe("gm-channel");
+    expect(config.gmNotificationRoleId).toBe("gm-notification-role");
 
     await repository.createWeeklyEvent({
       eventId: "routing-event",

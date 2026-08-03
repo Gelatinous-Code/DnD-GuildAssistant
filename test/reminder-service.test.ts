@@ -80,6 +80,7 @@ function config(overrides: Partial<GuildConfig> = {}): GuildConfig {
     reminderChannelId: CHANNEL_ID,
     adminRoleId: null,
     gmRoleId: null,
+    gmNotificationRoleId: null,
     reminderRoleId: ROLE_ID,
     timezone: "America/Denver",
     weeklyDay: 6,
