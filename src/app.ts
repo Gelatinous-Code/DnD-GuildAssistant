@@ -68,6 +68,7 @@ import {
   WeeklyExportLimitError,
 } from "./weekly-export";
 import { isGameTier } from "./domain/game-tier";
+import { DISCORD_COMMAND_SCHEMA_VERSION } from "./command-schema-version.js";
 
 const WEEKDAY_NAMES = [
   "",
@@ -79,6 +80,13 @@ const WEEKDAY_NAMES = [
   "Saturday",
   "Sunday",
 ] as const;
+
+export function commandSchemaVersionLine(): string {
+  return (
+    "🧩 **Discord command schema:** `" + DISCORD_COMMAND_SCHEMA_VERSION +
+    "` (expected by this Worker)."
+  );
+}
 
 interface InternalAttachmentResponse {
   filename: string;
@@ -813,6 +821,7 @@ async function handleGuildCommand(
     return ephemeral(
       boundedDiscordContent([
         "## Guild Assistant doctor",
+        commandSchemaVersionLine(),
         coreReady
           ? "✅ **Core Discord workflow is ready.**"
           : "❌ **Core workflow needs attention:** " + coreProblems.join(" "),

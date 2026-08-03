@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { handleDiscordInteraction } from "../src/app";
+import {
+  commandSchemaVersionLine,
+  handleDiscordInteraction,
+} from "../src/app";
+
+it("renders the Worker command-schema version for guild doctor", () => {
+  expect(commandSchemaVersionLine()).toMatch(/Discord command schema.*2026\.08\.03\.1/);
+});
 
 const env = {
   DB: {} as D1Database,

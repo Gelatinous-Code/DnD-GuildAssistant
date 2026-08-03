@@ -1,4 +1,7 @@
-import { commands } from "./commands.mjs";
+import {
+  commands,
+  DISCORD_COMMAND_SCHEMA_VERSION,
+} from "./commands.mjs";
 
 const applicationId = process.env.DISCORD_APPLICATION_ID;
 const guildId = process.env.DISCORD_GUILD_ID ?? process.env.DISCORD_TEST_GUILD_ID;
@@ -41,6 +44,7 @@ if (!response.ok) {
   process.exit(1);
 }
 
+console.log(`Discord command schema: ${DISCORD_COMMAND_SCHEMA_VERSION}`);
 console.log("Registered guild-scoped commands:");
 for (const command of body) {
   console.log(`- /${command.name} (${command.id})`);

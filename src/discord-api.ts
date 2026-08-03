@@ -1,6 +1,7 @@
 import {
   GAME_TIER_DEFINITIONS,
   type GameTier,
+  gameTierDefinition,
   gameTierLabel,
 } from "./domain/game-tier";
 
@@ -589,7 +590,13 @@ function componentId(parts: readonly string[]): string {
   return customId;
 }
 
-export type SignupAction = "gm" | "player" | "backup" | "withdraw";
+export type SignupAction =
+  | "gm"
+  | "player"
+  | "backup"
+  | "withdraw"
+  | "withdraw_gm"
+  | "withdraw_player";
 
 export function signupCustomId(
   eventId: string,
@@ -674,7 +681,7 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
         fields: tierSignups
           ? [
               ...tierSignups.map((tier) => ({
-                name: gameTierLabel(tier.gameTier),
+                name: `${gameTierDefinition(tier.gameTier).emoji} ${gameTierLabel(tier.gameTier)}`,
                 value: [
                   ...(audience === "player"
                     ? []
@@ -742,6 +749,7 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
                     style: ButtonStyle.Primary,
                     custom_id: signupCustomId(input.eventId, "gm", definition.tier),
                     label: `Run T${definition.tier}`,
+                    emoji: { name: definition.emoji },
                     disabled: !gmSignupEnabled,
                   })),
                   {
@@ -754,8 +762,8 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
                   {
                     type: ComponentType.Button,
                     style: ButtonStyle.Danger,
-                    custom_id: signupCustomId(input.eventId, "withdraw"),
-                    label: "Withdraw",
+                    custom_id: signupCustomId(input.eventId, "withdraw_gm"),
+                    label: audience === "combined" ? "Withdraw GM" : "Withdraw",
                     disabled: !withdrawEnabled,
                   },
                 ],
@@ -768,17 +776,16 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
                     style: ButtonStyle.Success,
                     custom_id: signupCustomId(input.eventId, "player", definition.tier),
                     label: `Play T${definition.tier}`,
+                    emoji: { name: definition.emoji },
                     disabled: !playerSignupEnabled,
                   })),
-                  ...(audience === "player"
-                    ? [{
-                        type: ComponentType.Button,
-                        style: ButtonStyle.Danger,
-                        custom_id: signupCustomId(input.eventId, "withdraw"),
-                        label: "Withdraw",
-                        disabled: !withdrawEnabled,
-                      }]
-                    : []),
+                  {
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Danger,
+                    custom_id: signupCustomId(input.eventId, "withdraw_player"),
+                    label: audience === "combined" ? "Withdraw Player" : "Withdraw",
+                    disabled: !withdrawEnabled,
+                  },
                 ],
               }]),
             ]

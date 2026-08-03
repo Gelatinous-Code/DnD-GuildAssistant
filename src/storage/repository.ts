@@ -1570,8 +1570,7 @@ export class GuildRepository {
            SUM(CASE WHEN signup_kind = 'player' THEN 1 ELSE 0 END) AS players,
            SUM(CASE WHEN signup_kind = 'gm'
              AND COALESCE(gm_commitment, 'primary') = 'primary' THEN 1 ELSE 0 END) AS gms,
-           SUM(CASE WHEN signup_kind = 'gm'
-             AND gm_commitment = 'backup' THEN 1 ELSE 0 END) AS gm_backups
+           SUM(CASE WHEN gm_commitment = 'backup' THEN 1 ELSE 0 END) AS gm_backups
           FROM signups WHERE event_id = ? AND status = 'active'`,
       )
       .bind(eventId)

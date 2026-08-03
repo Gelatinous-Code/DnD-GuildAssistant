@@ -445,10 +445,10 @@ class FakeRepository {
     const active = await this.listActiveSignups(eventId);
     return {
       players: active.filter((item) => item.signupKind === "player").length,
-      gms: active.filter((item) => item.signupKind === "gm").length,
-      gmBackups: active.filter(
-        (item) => item.signupKind === "gm" && item.gmCommitment === "backup",
+      gms: active.filter(
+        (item) => item.signupKind === "gm" && item.gmCommitment !== "backup",
       ).length,
+      gmBackups: active.filter((item) => item.gmCommitment === "backup").length,
     };
   }
 
@@ -1043,9 +1043,9 @@ describe("WeekService", () => {
     expect(discord.sends[1]?.payload.embeds?.[0]?.fields?.map(
       (field) => field.name,
     )).toEqual([
-      "Tier 1 · Levels 3–4",
-      "Tier 2 · Levels 5–7",
-      "Tier 3 · Levels 8+",
+      "1️⃣ Tier 1 · Levels 3–4",
+      "2️⃣ Tier 2 · Levels 5–7",
+      "3️⃣ Tier 3 · Levels 8+",
     ]);
     expect(repository.event).toMatchObject({
       signupChannelId: "events-channel",
@@ -1053,7 +1053,7 @@ describe("WeekService", () => {
     });
   });
 
-  it("switches signup kind authoritatively and then withdraws", async () => {
+  it("requires withdrawal before switching from GM to player", async () => {
     const repository = new FakeRepository();
     repository.event = weeklyEvent("open");
     const instance = service(repository, new FakeDiscord());
@@ -1065,12 +1065,20 @@ describe("WeekService", () => {
       displayName: "Player One",
       action: "gm",
     });
-    const switched = await instance.changeSignup({
-      guildId: "synthetic-guild",
-      eventId: "event-1",
-      userId: "player-1",
-      displayName: "Player One",
-      action: "player",
+    await expect(
+      instance.changeSignup({
+        guildId: "synthetic-guild",
+        eventId: "event-1",
+        userId: "player-1",
+        displayName: "Player One",
+        action: "player",
+      }),
+    ).rejects.toThrow(
+      "Withdraw from GM duty before signing up as a player.",
+    );
+    expect(repository.signups.get("player-1")).toMatchObject({
+      signupKind: "gm",
+      status: "active",
     });
     const withdrawn = await instance.changeSignup({
       guildId: "synthetic-guild",
@@ -1079,18 +1087,154 @@ describe("WeekService", () => {
       displayName: "Player One",
       action: "withdraw",
     });
+    const switched = await instance.changeSignup({
+      guildId: "synthetic-guild",
+      eventId: "event-1",
+      userId: "player-1",
+      displayName: "Player One",
+      action: "player",
+    });
 
     expect(switched.message).toBe("Signed up to play Tier 1 · Levels 3–4.");
     expect(repository.signups.get("player-1")?.signupKind).toBe("player");
-    expect(repository.signups.get("player-1")?.status).toBe("withdrawn");
+    expect(repository.signups.get("player-1")?.status).toBe("active");
     expect(withdrawn.message).toBe("You dropped from this week's games.");
     expect(repository.audits.map((item) => item.action)).toEqual([
       "signup.gm",
-      "signup.player",
       "signup.withdraw",
+      "signup.player",
     ]);
   });
 
+  it("requires player withdrawal before becoming a primary GM", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("open");
+    repository.signups.set("player-1", signup("player-1", "player"));
+
+    await expect(service(repository, new FakeDiscord()).changeSignup({
+      guildId: "synthetic-guild",
+      eventId: "event-1",
+      userId: "player-1",
+      displayName: "Player One",
+      action: "gm",
+    })).rejects.toThrow(
+      "Withdraw as a player before becoming a primary GM",
+    );
+    expect(repository.signups.get("player-1")).toMatchObject({
+      signupKind: "player",
+      status: "active",
+    });
+  });
+
+  it("allows a player to volunteer as backup without losing tier or signup order", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("open");
+    const originalSignup = {
+      ...signup("player-1", "player", NOW - 60_000),
+      gameTier: 2 as const,
+    };
+    repository.signups.set("player-1", originalSignup);
+    const instance = service(repository, new FakeDiscord());
+
+    const result = await instance.changeSignup({
+      guildId: "synthetic-guild",
+      eventId: "event-1",
+      userId: "player-1",
+      displayName: "Player One",
+      action: "backup",
+    });
+
+    expect(result.message).toContain("still signed up to play Tier 2");
+    expect(repository.signups.get("player-1")).toMatchObject({
+      signupKind: "player",
+      gameTier: 2,
+      gmCommitment: "backup",
+      signedUpAt: NOW - 60_000,
+      status: "active",
+    });
+    const gmCard = await instance.signupPayload(repository.event, "gm");
+    const playerCard = await instance.signupPayload(repository.event, "player");
+    expect(gmCard.embeds?.[0]?.fields?.at(-1)).toMatchObject({
+      name: "Backup GMs (1)",
+      value: expect.stringContaining("Player One"),
+    });
+    expect(playerCard.embeds?.[0]?.fields?.[1]?.value).toContain("Player One");
+  });
+
+  it("lets a backup GM add a player signup while remaining a backup", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("open");
+    repository.signups.set("backup-1", {
+      ...signup("backup-1", "gm", NOW - 60_000),
+      gameTier: null,
+      gmCommitment: "backup",
+    });
+
+    const result = await service(repository, new FakeDiscord()).changeSignup({
+      guildId: "synthetic-guild",
+      eventId: "event-1",
+      userId: "backup-1",
+      displayName: "Backup One",
+      action: "player",
+      gameTier: 3,
+    });
+
+    expect(result.message).toContain("kept your backup GM availability");
+    expect(repository.signups.get("backup-1")).toMatchObject({
+      signupKind: "player",
+      gameTier: 3,
+      gmCommitment: "backup",
+      status: "active",
+    });
+  });
+
+  it("withdraws player and backup commitments independently", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("open");
+    repository.signups.set("both-1", {
+      ...signup("both-1", "player"),
+      gameTier: 2,
+      gmCommitment: "backup",
+    });
+    const instance = service(repository, new FakeDiscord());
+
+    await expect(instance.changeSignup({
+      guildId: "synthetic-guild",
+      eventId: "event-1",
+      userId: "both-1",
+      displayName: "Both One",
+      action: "withdraw_gm",
+    })).resolves.toMatchObject({
+      message: expect.stringContaining("still signed up to play Tier 2"),
+    });
+    expect(repository.signups.get("both-1")).toMatchObject({
+      signupKind: "player",
+      gameTier: 2,
+      gmCommitment: null,
+      status: "active",
+    });
+
+    repository.signups.set("both-1", {
+      ...signup("both-1", "player"),
+      gameTier: 2,
+      gmCommitment: "backup",
+    });
+    await expect(instance.changeSignup({
+      guildId: "synthetic-guild",
+      eventId: "event-1",
+      userId: "both-1",
+      displayName: "Both One",
+      action: "withdraw_player",
+    })).resolves.toMatchObject({
+      message: "You withdrew as a player and remain available as a backup GM.",
+    });
+    expect(repository.signups.get("both-1")).toMatchObject({
+      signupKind: "gm",
+      gameTier: null,
+      gmCommitment: "backup",
+      status: "active",
+    });
+  });
   it.each(["locked", "planned"] as const)(
     "keeps GM withdrawal available while a %s week awaits publication",
     async (status) => {

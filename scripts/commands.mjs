@@ -1,4 +1,6 @@
 import { m6Commands } from "./m6-commands.mjs";
+import { DISCORD_COMMAND_SCHEMA_VERSION } from "../src/command-schema-version.js";
+export { DISCORD_COMMAND_SCHEMA_VERSION };
 
 // MVP destinations are normal text and announcement channels. Threads and
 // forum/media parents require additional lifecycle and permission semantics.
@@ -354,7 +356,7 @@ export const commands = [
       {
         type: 1,
         name: "archive",
-        description: "Archive the current week without changing member roles.",
+        description: "Archive the current week.",
       },
       {
         type: 1,
