@@ -382,6 +382,30 @@ export const commands = [
             min_length: 3,
             max_length: 500,
           },
+          {
+            type: 5,
+            name: "confirm",
+            description: "Required: confirm this will stop and cancel the active week.",
+            required: true,
+          },
+        ],
+      },
+      {
+        type: 1,
+        name: "restart",
+        description: "Clear a cancelled occurrence and reopen fresh signup posts.",
+        options: [
+          {
+            type: 5,
+            name: "confirm",
+            description: "Required: clear unfinished signup and table data for this occurrence.",
+            required: true,
+          },
+          {
+            type: 3,
+            name: "starts_at",
+            description: "Optional cancelled game instant; defaults to the next scheduled game.",
+          },
         ],
       },
       {

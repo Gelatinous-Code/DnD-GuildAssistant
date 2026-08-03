@@ -31,4 +31,42 @@ describe("Discord command safety boundary", () => {
       automation?.options?.map((option: { name: string }) => option.name),
     ).not.toContain("role_sync");
   });
+  it("registers a confirmed cancelled-week restart", () => {
+    const week = commands.find((command: { name: string }) => command.name === "week");
+    const restart = week?.options?.find(
+      (option: { name: string }) => option.name === "restart",
+    );
+
+    expect(restart?.description).toContain("cancelled occurrence");
+    expect(restart?.options).toEqual([
+      expect.objectContaining({
+        name: "confirm",
+        type: 5,
+        required: true,
+      }),
+      expect.objectContaining({
+        name: "starts_at",
+        type: 3,
+      }),
+    ]);
+  });
+  it("requires explicit confirmation to cancel a week", () => {
+    const week = commands.find((command: { name: string }) => command.name === "week");
+    const cancel = week?.options?.find(
+      (option: { name: string }) => option.name === "cancel",
+    );
+
+    expect(cancel?.options).toEqual([
+      expect.objectContaining({
+        name: "reason",
+        type: 3,
+        required: true,
+      }),
+      expect.objectContaining({
+        name: "confirm",
+        type: 5,
+        required: true,
+      }),
+    ]);
+  });
 });

@@ -1021,6 +1021,106 @@ export class GuildRepository {
     return event;
   }
 
+  async restartCancelledWeeklyEvent(
+    input: CreateWeeklyEventInput,
+  ): Promise<WeeklyEvent | null> {
+    const now = this.now();
+    const eligibleEvent = `EXISTS (
+      SELECT 1
+      FROM weekly_events event
+      WHERE event.event_id = ?
+        AND event.guild_id = ?
+        AND event.status = 'cancelled'
+        AND event.tables_finalized_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM session_completions completion
+          WHERE completion.source_event_id = event.event_id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM dm_priority_grants grant_record
+          WHERE grant_record.source_event_id = event.event_id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM dm_priority_credits credit
+          WHERE credit.target_event_id = event.event_id
+        )
+    )`;
+    const scopedDelete = (table: string) =>
+      this.db
+        .prepare(
+          `DELETE FROM ${table}
+           WHERE event_id = ? AND ${eligibleEvent}`,
+        )
+        .bind(input.eventId, input.eventId, input.guildId);
+    const results = await this.db.batch([
+      scopedDelete("reminder_deliveries"),
+      scopedDelete("operations"),
+      scopedDelete("signups"),
+      scopedDelete("plans"),
+      this.db
+        .prepare(
+          `UPDATE weekly_events SET
+             title = ?,
+             starts_at = ?,
+             ends_at = ?,
+             signup_opens_at = ?,
+             player_signup_opens_at = ?,
+             signup_locks_at = ?,
+             open_seating_at = ?,
+             table_selection_closes_at = ?,
+             reminder_at = ?,
+             status = 'open',
+             signup_channel_id = NULL,
+             signup_message_id = NULL,
+             gm_signup_channel_id = NULL,
+             gm_signup_message_id = NULL,
+             table_channel_id = NULL,
+             table_message_id = NULL,
+             final_manifest_channel_id = NULL,
+             final_manifest_message_id = NULL,
+             table_state_version = 0,
+             finalized_plan_id = NULL,
+             finalized_table_state_version = NULL,
+             tables_finalized_at = NULL,
+             created_by_user_id = ?,
+             published_at = NULL,
+             archived_at = NULL,
+             updated_at = ?
+           WHERE event_id = ? AND guild_id = ? AND status = 'cancelled'
+             AND tables_finalized_at IS NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM session_completions completion
+               WHERE completion.source_event_id = weekly_events.event_id
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM dm_priority_grants grant_record
+               WHERE grant_record.source_event_id = weekly_events.event_id
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM dm_priority_credits credit
+               WHERE credit.target_event_id = weekly_events.event_id
+             )`,
+        )
+        .bind(
+          input.title,
+          input.startsAt,
+          asNullable(input.endsAt),
+          input.signupOpensAt,
+          input.playerSignupOpensAt ?? input.signupOpensAt,
+          input.signupLocksAt,
+          input.openSeatingAt ?? input.signupLocksAt,
+          input.tableSelectionClosesAt ?? input.startsAt,
+          asNullable(input.reminderAt),
+          asNullable(input.createdByUserId),
+          now,
+          input.eventId,
+          input.guildId,
+        ),
+    ]);
+    if (results[4]?.meta.changes !== 1) return null;
+    return this.getWeeklyEvent(input.eventId);
+  }
+
   async getWeeklyEvent(eventId: string): Promise<WeeklyEvent | null> {
     const row = await this.db
       .prepare("SELECT * FROM weekly_events WHERE event_id = ?")

@@ -198,7 +198,7 @@ than expected before `/week open`, generate fresh values.
       the admin-only grant and credit identifiers privately.
 - [ ] Cancel before the start time:
 
-      `/week cancel reason:Pilot cancellation refund`
+      `/week cancel reason:Pilot cancellation refund confirm:True`
 
       Member A runs `/priority status` and verifies the token is available again
       with its original expiration date. Diagnostics must show the reservation,
@@ -264,7 +264,7 @@ than expected before `/week open`, generate fresh values.
       5. Have that promoted player use **Leave Table**. Verify their weekly
          reservation remains active; leaving a table must not withdraw them.
 
-      Then run `/week cancel reason:Pilot review-mode complete`.
+      Then run `/week cancel reason:Pilot review-mode complete confirm:True`.
 - [ ] Immediately return to `/guild automation mode:Paused confirm:True` before
       changing the schedule for the next check.
 
@@ -298,7 +298,7 @@ than expected before `/week open`, generate fresh values.
       Cron interval and verify `/week status` shows one successful publish
       operation and exactly one public table message. Allow one additional Cron
       interval and verify no duplicate appears. Finish with
-      `/week cancel reason:Pilot autopilot publication complete`.
+      `/week cancel reason:Pilot autopilot publication complete confirm:True`.
 - [ ] Return the disposable guild to a safe state with
       `/guild automation mode:Paused confirm:True`, then verify `/guild status`
       reports **Paused**. Do not leave the reduced-capacity pilot schedule in

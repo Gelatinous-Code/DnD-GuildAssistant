@@ -145,7 +145,7 @@ describe("deferred Discord interactions", () => {
     expect(init.method).toBe("PATCH");
     expect(JSON.parse(String(init.body))).toMatchObject({
       content:
-        "⚠️ The assistant could not complete that action. An administrator can run /guild doctor and check Worker logs.",
+        "⚠️ An unexpected error stopped `/guild setup`. Retry once. If it fails again, give an administrator reference `502`; `/guild doctor` checks setup only and may still be green.",
       allowed_mentions: { parse: [] },
     });
   });
@@ -189,6 +189,68 @@ describe("deferred Discord interactions", () => {
     expect(JSON.parse(String(init.body))).toMatchObject({
       content:
         "This command has been retired. Ask a server admin if you need a role change.",
+      allowed_mentions: { parse: [] },
+    });
+  });
+
+  it("rejects an unconfirmed week cancellation before reading or changing data", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ id: "304", channel_id: "400", content: "done" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    let background: Promise<unknown> | undefined;
+    const context = {
+      waitUntil(promise: Promise<unknown>) {
+        background = promise;
+      },
+    } as ExecutionContext;
+
+    const response = await handleDiscordInteraction(
+      {
+        id: "504",
+        application_id: "1533171671886725293",
+        token: "interaction-token",
+        type: 2,
+        guild_id: "1533181439376494642",
+        member: {
+          permissions: "32",
+          user: { id: "1533183019031199946", username: "Chappy" },
+        },
+        data: {
+          name: "week",
+          options: [{
+            type: 1,
+            name: "cancel",
+            options: [
+              {
+                type: 3,
+                name: "reason",
+                value: "Accidental cancellation test",
+              },
+              {
+                type: 5,
+                name: "confirm",
+                value: false,
+              },
+            ],
+          }],
+        },
+      },
+      env,
+      context,
+    );
+
+    expect(await response.json()).toEqual({
+      type: 5,
+      data: { flags: 64 },
+    });
+    expect(background).toBeDefined();
+    await background;
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      content:
+        "⚠️ Cancellation was not confirmed, so nothing changed. Set confirm to True only when you intend to stop the active week. You can later redo an unfinished cancelled week with `/week restart confirm:True`.",
       allowed_mentions: { parse: [] },
     });
   });

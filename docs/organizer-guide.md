@@ -71,7 +71,7 @@ blocked DMs, disputes, or exceptional refunds.
   post, or use `/week signup` for an audited correction.
 - Member changes after publication: use `/week signup`, then review the new plan
   and table choices before republishing.
-- The entire event will not happen: use `/week cancel` with a clear reason.
+- The entire event will not happen: use `/week cancel reason:... confirm:True`. The confirmation is required because this stops the active week. If the cancellation was premature, `/week restart confirm:True` can clear its unfinished work and reopen fresh signup posts.
 - A single scheduled action should not happen: use `/week skip` for that
   occurrence.
 

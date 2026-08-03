@@ -285,6 +285,7 @@ class FakeRepository {
   forcedClaim: BeginOperationResult | null = null;
   publishResult = true;
   returnTerminalEvent = false;
+  restartAllowed = true;
 
   async getGuildConfig() {
     return this.config;
@@ -300,6 +301,50 @@ class FakeRepository {
   async getLatestWeeklyEvent() {
     return this.event;
   }
+  async findWeeklyEventByStart(guildId: string, startsAt: number) {
+    return this.event?.guildId === guildId && this.event.startsAt === startsAt
+      ? this.event
+      : null;
+  }
+
+  async restartCancelledWeeklyEvent(input: CreateWeeklyEventInput) {
+    if (
+      !this.restartAllowed ||
+      !this.event ||
+      this.event.eventId !== input.eventId ||
+      this.event.guildId !== input.guildId ||
+      this.event.status !== "cancelled"
+    ) {
+      return null;
+    }
+    this.signups.clear();
+    this.bundles.clear();
+    this.operations.clear();
+    this.savedDrafts.length = 0;
+    this.event = {
+      ...this.event,
+      ...input,
+      endsAt: input.endsAt ?? null,
+      reminderAt: input.reminderAt ?? null,
+      status: "open",
+      signupChannelId: null,
+      signupMessageId: null,
+      gmSignupChannelId: null,
+      gmSignupMessageId: null,
+      tableChannelId: null,
+      tableMessageId: null,
+      finalManifestChannelId: null,
+      finalManifestMessageId: null,
+      tableStateVersion: 0,
+      finalizedPlanId: null,
+      finalizedTableStateVersion: null,
+      tablesFinalizedAt: null,
+      publishedAt: null,
+      archivedAt: null,
+    };
+    return this.event;
+  }
+
 
   async getWeeklyExportSnapshot(guildId: string, eventId?: string) {
     const event = this.event;
@@ -829,6 +874,105 @@ describe("WeekService", () => {
       signupChannelId: "events-channel",
       signupMessageId: "message-1",
     });
+  });
+
+  it("explains how to redo a cancelled occurrence instead of leaking a D1 error", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("cancelled");
+    const instance = service(repository, new FakeDiscord());
+
+    await expect(instance.openWeek({
+      guildId: "synthetic-guild", startsAt: "2026-08-08T00:30:00Z",
+    })).rejects.toThrow(
+      "/week restart confirm:True",
+    );
+    await expect(instance.openWeek({
+      guildId: "synthetic-guild", startsAt: "2026-08-08T00:30:00Z",
+    })).rejects.toThrow(
+      "/week open starts_at:",
+    );
+    expect(repository.createdEvents).toHaveLength(0);
+  });
+
+  it("restarts a cancelled occurrence with fresh signup and table state", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("cancelled");
+    repository.signups.set("gm-1", signup("gm-1", "gm"));
+    repository.bundles.set("plan-1", planBundle());
+    repository.operations.set("old-operation", operation("old-operation", "succeeded"));
+    const discord = new FakeDiscord();
+
+    const restarted = await service(repository, discord).restartWeek({
+      guildId: "synthetic-guild",
+      actorUserId: "admin-2",
+      confirmed: true,
+      startsAt: "2026-08-08T00:30:00Z",
+    });
+
+    expect(restarted).toMatchObject({
+      eventId: "event-1",
+      status: "open",
+      signupChannelId: "events-channel",
+      signupMessageId: "message-1",
+      publishedAt: null,
+      archivedAt: null,
+    });
+    expect(repository.signups.size).toBe(0);
+    expect(repository.bundles.size).toBe(0);
+    expect(repository.operations.size).toBe(0);
+    expect(discord.sends).toHaveLength(1);
+    expect(repository.audits.at(-1)).toMatchObject({
+      action: "week.restarted",
+      actorUserId: "admin-2",
+      details: {
+        cleared: ["signups", "plans", "reminder_deliveries", "operations"],
+      },
+    });
+  });
+
+  it("requires confirmation and protects cancelled weeks with durable history", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("cancelled");
+    const instance = service(repository, new FakeDiscord());
+
+    await expect(instance.restartWeek({
+      guildId: "synthetic-guild",
+      actorUserId: "admin-1",
+      confirmed: false,
+      startsAt: "2026-08-08T00:30:00Z",
+    })).rejects.toThrow("Set confirm to True");
+    expect(repository.event.status).toBe("cancelled");
+
+    repository.restartAllowed = false;
+    await expect(instance.restartWeek({
+      guildId: "synthetic-guild",
+      actorUserId: "admin-1",
+      confirmed: true,
+      startsAt: "2026-08-08T00:30:00Z",
+    })).rejects.toThrow("finalized sessions or active priority-token history");
+    expect(repository.event.status).toBe("cancelled");
+  });
+
+  it.each([
+    { autoPublishEnabled: false, expected: "build the review draft" },
+    { autoPublishEnabled: true, expected: "Autopilot will lock signups" },
+  ])("guides planning when no week is active", async ({ autoPublishEnabled, expected }) => {
+    const repository = new FakeRepository();
+    repository.config = guildConfig({ autoPublishEnabled });
+    repository.event = null;
+
+    await expect(
+      service(repository, new FakeDiscord()).generatePlan(
+        "synthetic-guild",
+        "admin-1",
+      ),
+    ).rejects.toThrow("/week open");
+    await expect(
+      service(repository, new FakeDiscord()).generatePlan(
+        "synthetic-guild",
+        "admin-1",
+      ),
+    ).rejects.toThrow(expected);
   });
 
   it("mentions the GM role only when the combined signup post is first created", async () => {
@@ -1932,7 +2076,7 @@ describe("WeekService", () => {
     const instance = service(repository, discord);
 
     await expect(instance.archiveWeek("synthetic-guild", "admin-1")).rejects.toThrow(
-      "Only planned or published weeks can be archived. Use /week cancel for an unfinished week.",
+      "Only planned or published weeks can be archived. Use `/week cancel reason:<why> confirm:True` for an unfinished week.",
     );
     expect(repository.event.status).toBe("open");
     expect(repository.audits).toHaveLength(0);
