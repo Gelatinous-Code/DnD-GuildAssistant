@@ -947,6 +947,55 @@ describe("WeekService", () => {
     ]);
   });
 
+  it.each(["locked", "planned"] as const)(
+    "keeps GM withdrawal available while a %s week awaits publication",
+    async (status) => {
+      const repository = new FakeRepository();
+      repository.event = weeklyEvent(status);
+      repository.signups.set("gm-1", signup("gm-1", "gm"));
+      const instance = service(repository, new FakeDiscord());
+
+      const card = await instance.signupPayload(repository.event, "gm");
+      expect(card.components?.[0]?.components.map((button) => ({
+        label: button.label,
+        disabled: button.disabled,
+      }))).toEqual([
+        { label: "Run T1", disabled: true },
+        { label: "Run T2", disabled: true },
+        { label: "Run T3", disabled: true },
+        { label: "Backup GM", disabled: true },
+        { label: "Withdraw", disabled: false },
+      ]);
+
+      await expect(instance.changeSignup({
+        guildId: "synthetic-guild",
+        eventId: "event-1",
+        userId: "gm-1",
+        displayName: "GM One",
+        action: "withdraw",
+      })).resolves.toMatchObject({ message: "You dropped from this week's games." });
+      expect(repository.signups.get("gm-1")?.status).toBe("withdrawn");
+    },
+  );
+
+  it("closes locked-week withdrawal when the game starts", async () => {
+    const repository = new FakeRepository();
+    repository.event = weeklyEvent("locked");
+    repository.signups.set("gm-1", signup("gm-1", "gm"));
+    const instance = service(repository, new FakeDiscord(), [], STARTS_AT);
+
+    const card = await instance.signupPayload(repository.event, "gm");
+    expect(card.components?.[0]?.components.at(-1)?.disabled).toBe(true);
+    await expect(instance.changeSignup({
+      guildId: "synthetic-guild",
+      eventId: "event-1",
+      userId: "gm-1",
+      displayName: "GM One",
+      action: "withdraw",
+    })).rejects.toThrow("Self-service withdrawal is closed");
+    expect(repository.signups.get("gm-1")?.status).toBe("active");
+  });
+
   it("rejects a signup interaction replayed from a different guild", async () => {
     const repository = new FakeRepository();
     repository.event = weeklyEvent("open");

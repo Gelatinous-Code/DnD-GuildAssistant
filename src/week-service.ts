@@ -494,7 +494,7 @@ export class WeekService {
     const playerSignupEnabled =
       event.status === "open" && audience !== "gm" && now >= playerSignupOpensAt;
     const withdrawEnabled =
-      (event.status === "open" || event.status === "published") &&
+      ["open", "locked", "planned", "published"].includes(event.status) &&
       now < event.tableSelectionClosesAt;
     const description =
       audience === "gm"
@@ -664,7 +664,7 @@ export class WeekService {
 
     if (input.action === "withdraw") {
       if (
-        !["open", "published"].includes(event.status) ||
+        !["open", "locked", "planned", "published"].includes(event.status) ||
         now >= event.tableSelectionClosesAt
       ) {
         throw new UserFacingError(
