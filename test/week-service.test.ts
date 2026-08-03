@@ -1043,9 +1043,9 @@ describe("WeekService", () => {
     expect(discord.sends[1]?.payload.embeds?.[0]?.fields?.map(
       (field) => field.name,
     )).toEqual([
-      "Tier 1 · Levels 3–4",
-      "Tier 2 · Levels 5–7",
-      "Tier 3 · Levels 8+",
+      "1️⃣ Tier 1 · Levels 3–4",
+      "2️⃣ Tier 2 · Levels 5–7",
+      "3️⃣ Tier 3 · Levels 8+",
     ]);
     expect(repository.event).toMatchObject({
       signupChannelId: "events-channel",

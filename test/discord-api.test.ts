@@ -604,9 +604,9 @@ describe("Discord message rendering", () => {
     });
 
     expect(message.embeds?.[0].fields?.map((field) => field.name)).toEqual([
-      "Tier 1 · Levels 3–4",
-      "Tier 2 · Levels 5–7",
-      "Tier 3 · Levels 8+",
+      "1️⃣ Tier 1 · Levels 3–4",
+      "2️⃣ Tier 2 · Levels 5–7",
+      "3️⃣ Tier 3 · Levels 8+",
       "Backup GMs (1)",
     ]);
     expect(message.components).toHaveLength(2);
@@ -643,24 +643,30 @@ describe("Discord message rendering", () => {
     const playerCard = renderSignupMessage({ ...shared, audience: "player" });
 
     expect(gmCard.embeds?.[0]?.fields?.map((field) => field.name)).toEqual([
-      "Tier 1 · Levels 3–4",
-      "Tier 2 · Levels 5–7",
-      "Tier 3 · Levels 8+",
+      "1️⃣ Tier 1 · Levels 3–4",
+      "2️⃣ Tier 2 · Levels 5–7",
+      "3️⃣ Tier 3 · Levels 8+",
       "Backup GMs (1)",
     ]);
     expect(gmCard.embeds?.[0]?.fields?.[0]?.value).toBe("**GMs (1):** GM One");
     expect(gmCard.components?.[0]?.components.map((button) => button.label)).toEqual([
       "Run T1", "Run T2", "Run T3", "Backup GM", "Withdraw",
     ]);
+    expect(gmCard.components?.[0]?.components.slice(0, 3).map((button) => button.emoji?.name)).toEqual([
+      "1️⃣", "2️⃣", "3️⃣",
+    ]);
 
     expect(playerCard.embeds?.[0]?.fields?.map((field) => field.name)).toEqual([
-      "Tier 1 · Levels 3–4",
-      "Tier 2 · Levels 5–7",
-      "Tier 3 · Levels 8+",
+      "1️⃣ Tier 1 · Levels 3–4",
+      "2️⃣ Tier 2 · Levels 5–7",
+      "3️⃣ Tier 3 · Levels 8+",
     ]);
     expect(playerCard.embeds?.[0]?.fields?.[0]?.value).toBe("**Players (1):** Player One");
     expect(playerCard.components?.[0]?.components.map((button) => button.label)).toEqual([
       "Play T1", "Play T2", "Play T3", "Withdraw",
+    ]);
+    expect(playerCard.components?.[0]?.components.slice(0, 3).map((button) => button.emoji?.name)).toEqual([
+      "1️⃣", "2️⃣", "3️⃣",
     ]);
   });
 

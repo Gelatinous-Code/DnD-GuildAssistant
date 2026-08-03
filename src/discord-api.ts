@@ -1,6 +1,7 @@
 import {
   GAME_TIER_DEFINITIONS,
   type GameTier,
+  gameTierDefinition,
   gameTierLabel,
 } from "./domain/game-tier";
 
@@ -680,7 +681,7 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
         fields: tierSignups
           ? [
               ...tierSignups.map((tier) => ({
-                name: gameTierLabel(tier.gameTier),
+                name: `${gameTierDefinition(tier.gameTier).emoji} ${gameTierLabel(tier.gameTier)}`,
                 value: [
                   ...(audience === "player"
                     ? []
@@ -748,6 +749,7 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
                     style: ButtonStyle.Primary,
                     custom_id: signupCustomId(input.eventId, "gm", definition.tier),
                     label: `Run T${definition.tier}`,
+                    emoji: { name: definition.emoji },
                     disabled: !gmSignupEnabled,
                   })),
                   {
@@ -774,6 +776,7 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
                     style: ButtonStyle.Success,
                     custom_id: signupCustomId(input.eventId, "player", definition.tier),
                     label: `Play T${definition.tier}`,
+                    emoji: { name: definition.emoji },
                     disabled: !playerSignupEnabled,
                   })),
                   {
