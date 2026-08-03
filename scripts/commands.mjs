@@ -386,6 +386,24 @@ export const commands = [
       },
       {
         type: 1,
+        name: "restart",
+        description: "Clear a cancelled occurrence and reopen fresh signup posts.",
+        options: [
+          {
+            type: 5,
+            name: "confirm",
+            description: "Required: clear unfinished signup and table data for this occurrence.",
+            required: true,
+          },
+          {
+            type: 3,
+            name: "starts_at",
+            description: "Optional cancelled game instant; defaults to the next scheduled game.",
+          },
+        ],
+      },
+      {
+        type: 1,
         name: "retry",
         description: "Safely retry one idempotent scheduled step.",
         options: [

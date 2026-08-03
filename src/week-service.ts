@@ -386,6 +386,37 @@ export class WeekService {
       throw new UserFacingError("The game start must be in the future.");
     }
     const windows = this.cadenceWindows(config, startsAt);
+    const existingAtStart = await this.repository.findWeeklyEventByStart(
+      input.guildId,
+      startsAt,
+    );
+    if (existingAtStart) {
+      const followingStartsAt = Date.parse(
+        nextWeeklyOccurrence(
+          {
+            weekday: config.weeklyDay,
+            time: config.weeklyTime,
+            timeZone: config.timezone,
+          },
+          new Date(startsAt + 1_000).toISOString(),
+        ),
+      );
+      const followingCommand =
+        `/week open starts_at:${new Date(followingStartsAt).toISOString()}`;
+      if (existingAtStart.status === "cancelled") {
+        throw new UserFacingError(
+          "A cancelled week already exists for " + unix(startsAt) +
+          ". To redo that game from empty signups and tables, run `/week restart confirm:True`. " +
+          "To keep it cancelled and open the following weekly game, run `" +
+          followingCommand + "`.",
+        );
+      }
+      throw new UserFacingError(
+        "A week already exists for " + unix(startsAt) + " in phase '" +
+        existingAtStart.status + "'. Run `/week status`, or open the following game with `" +
+        followingCommand + "`.",
+      );
+    }
 
     const event = await this.repository.createWeeklyEvent({
       eventId: this.id(),
@@ -413,6 +444,105 @@ export class WeekService {
       details: { startsAt },
     });
     return (await this.repository.getWeeklyEvent(event.eventId)) ?? event;
+  }
+
+  async restartWeek(input: {
+    guildId: string;
+    actorUserId?: string;
+    startsAt?: string;
+    confirmed: boolean;
+  }): Promise<WeeklyEvent> {
+    if (!input.confirmed) {
+      throw new UserFacingError(
+        "Restart clears the cancelled week's signups and table work. Set confirm to True to continue.",
+      );
+    }
+    const config = await this.requireConfig(input.guildId);
+    const current = await this.repository.getCurrentWeeklyEvent(input.guildId);
+    if (current) {
+      throw new UserFacingError(
+        "A week is already active in phase '" + current.status +
+        "'. Cancel or finish it before restarting another occurrence.",
+      );
+    }
+
+    let startsAt: number;
+    if (input.startsAt) {
+      startsAt = Date.parse(input.startsAt);
+      if (!Number.isFinite(startsAt)) {
+        throw new UserFacingError(
+          "starts_at must be a valid ISO-8601 instant such as 2026-08-09T00:30:00Z.",
+        );
+      }
+    } else {
+      startsAt = Date.parse(
+        nextWeeklyOccurrence(
+          {
+            weekday: config.weeklyDay,
+            time: config.weeklyTime,
+            timeZone: config.timezone,
+          },
+          new Date(this.now()).toISOString(),
+        ),
+      );
+    }
+    if (startsAt <= this.now()) {
+      throw new UserFacingError("The game start must be in the future.");
+    }
+
+    const cancelled = await this.repository.findWeeklyEventByStart(
+      input.guildId,
+      startsAt,
+    );
+    if (!cancelled) {
+      throw new UserFacingError(
+        "There is no cancelled week for " + unix(startsAt) +
+        ". Run `/week open` to create that occurrence.",
+      );
+    }
+    if (cancelled.status !== "cancelled") {
+      throw new UserFacingError(
+        "The week at " + unix(startsAt) + " is in phase '" + cancelled.status +
+        "', not cancelled. Run `/week status` for its available actions.",
+      );
+    }
+
+    const windows = this.cadenceWindows(config, startsAt);
+    const restarted = await this.repository.restartCancelledWeeklyEvent({
+      eventId: cancelled.eventId,
+      guildId: input.guildId,
+      title: cancelled.title,
+      startsAt,
+      endsAt: startsAt + config.eventDurationMinutes * 60_000,
+      signupOpensAt: windows.gmSignupOpensAt,
+      playerSignupOpensAt: windows.playerSignupOpensAt,
+      signupLocksAt: windows.tablesPublishAt,
+      openSeatingAt: windows.openSeatingAt,
+      tableSelectionClosesAt: startsAt,
+      status: "open",
+      source: "native",
+      createdByUserId: input.actorUserId,
+    });
+    if (!restarted) {
+      throw new UserFacingError(
+        "That cancelled week cannot be restarted because finalized sessions or active priority-token history is attached. Keep it cancelled and use `/week open starts_at:<another future ISO time>`.",
+      );
+    }
+
+    await this.ensureSignupPost(restarted, config);
+    await this.repository.appendAudit({
+      guildId: input.guildId,
+      eventId: restarted.eventId,
+      actorUserId: input.actorUserId,
+      action: "week.restarted",
+      entityType: "weekly_event",
+      entityId: restarted.eventId,
+      details: {
+        startsAt,
+        cleared: ["signups", "plans", "reminder_deliveries", "operations"],
+      },
+    });
+    return (await this.repository.getWeeklyEvent(restarted.eventId)) ?? restarted;
   }
 
   async openExistingEvent(event: WeeklyEvent): Promise<void> {
@@ -1085,7 +1215,15 @@ export class WeekService {
     let event = eventId
       ? await this.repository.getWeeklyEvent(eventId)
       : await this.repository.getCurrentWeeklyEvent(guildId);
-    if (!event) throw new UserFacingError("There is no active week to plan.");
+    if (!event) {
+      throw new UserFacingError(
+        "There is no active week to plan. Run `/week open` to create the next " +
+        "scheduled game and post fresh GM/player signup cards. " +
+        (config.autoPublishEnabled
+          ? "Autopilot will lock signups, build the table plan, and publish it on schedule; run `/week plan` only when you want an early manual draft."
+          : "When the signup list is ready, run `/week plan` again to lock signups and build the review draft."),
+      );
+    }
     if (event.guildId !== guildId) {
       throw new UserFacingError("That weekly event belongs to a different server.");
     }

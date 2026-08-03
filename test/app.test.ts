@@ -145,7 +145,7 @@ describe("deferred Discord interactions", () => {
     expect(init.method).toBe("PATCH");
     expect(JSON.parse(String(init.body))).toMatchObject({
       content:
-        "⚠️ The assistant could not complete that action. An administrator can run /guild doctor and check Worker logs.",
+        "⚠️ An unexpected error stopped `/guild setup`. Retry once. If it fails again, give an administrator reference `502`; `/guild doctor` checks setup only and may still be green.",
       allowed_mentions: { parse: [] },
     });
   });

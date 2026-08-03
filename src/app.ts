@@ -1040,6 +1040,20 @@ async function handleWeekCommand(
     await week.archiveWeek(guildId, actorUserId);
     return ephemeral("📦 Week archived.");
   }
+  if (invocation.subcommand === "restart") {
+    const event = await week.restartWeek({
+      guildId,
+      actorUserId,
+      startsAt: stringOption(invocation, "starts_at"),
+      confirmed: booleanOption(invocation, "confirm") === true,
+    });
+    await reminders.enqueuePreLockReminder(event);
+    return ephemeral(
+      "♻️ Restarted **" + event.title + "** for <t:" +
+      Math.floor(event.startsAt / 1000) +
+      ":F>. Previous unfinished signups and table work were cleared; fresh signup posts are open.",
+    );
+  }
   if (invocation.subcommand === "cancel") {
     const reason = stringOption(invocation, "reason") ?? "";
     if (reason.replace(/[\r\n]+/g, " ").trim().length < 3) {
@@ -1051,7 +1065,7 @@ async function handleWeekCommand(
       env, current, actorUserId ?? interaction.id ?? "discord-interaction", reason);
     const event = await week.cancelWeek(guildId, actorUserId, reason);
     return ephemeral(
-      "🛑 Cancelled **" + event.title + "**.",
+      "🛑 Cancelled **" + event.title + "**. To discard its unfinished signup/table work and redo this same game time, run `/week restart confirm:True`.",
     );
   }
   if (invocation.subcommand === "retry") {
@@ -1400,6 +1414,12 @@ async function executeDiscordInteraction(
     if (error instanceof UserFacingError || error instanceof ReminderConfigurationError) {
       return ephemeral("⚠️ " + error.message);
     }
+    const commandName = interaction.data?.name;
+    const subcommandName = interaction.data?.options?.[0]?.name;
+    const actionName = commandName
+      ? `/${commandName}${subcommandName ? " " + subcommandName : ""}`
+      : "that action";
+    const reference = (interaction.id ?? "unknown").slice(-8);
     console.error(
       JSON.stringify({
         kind: "guild-assistant.interaction-error",
@@ -1409,7 +1429,10 @@ async function executeDiscordInteraction(
       }),
     );
     return ephemeral(
-      "⚠️ The assistant could not complete that action. An administrator can run /guild doctor and check Worker logs.",
+      "⚠️ An unexpected error stopped `" + actionName +
+      "`. Retry once. If it fails again, give an administrator reference `" +
+      reference +
+      "`; `/guild doctor` checks setup only and may still be green.",
     );
   }
 }

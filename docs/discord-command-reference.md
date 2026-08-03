@@ -36,7 +36,8 @@ These require **Manage Server**.
 | Command | Purpose |
 | --- | --- |
 | `/week status` | Show the active phase, signup counts, plan, waitlists, and recent operation results. |
-| `/week open` | Manually open the next scheduled week or a specifically dated test event. |
+| `/week open` | Manually open the next scheduled week or a specifically dated test event; if that occurrence was cancelled, the bot explains how to restart it. |
+| `/week restart confirm:True` | Clear an unfinished cancelled occurrence and reopen fresh signup posts for the same game time. Weeks with finalized sessions or active priority-token history cannot be restarted. |
 | `/week signup` | Record an audited late signup, withdrawal, or organizer correction. |
 | `/week lock` | Manually close signup changes for planning. |
 | `/week plan` | Generate or regenerate the deterministic private draft. |
