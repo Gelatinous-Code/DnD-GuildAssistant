@@ -59,11 +59,19 @@ describe("game-tier seating D1 boundary", () => {
       signupKind: "player",
       gameTier: 2,
     });
+    await repository.saveSignup({
+      eventId,
+      userId: `${prefix}:player-backup`,
+      displayName: "Player Backup",
+      signupKind: "player",
+      gameTier: 1,
+      gmCommitment: "backup",
+    });
 
     await expect(repository.countActiveSignups(eventId)).resolves.toEqual({
-      players: 1,
+      players: 2,
       gms: 1,
-      gmBackups: 1,
+      gmBackups: 2,
     });
     const bundle = await repository.saveDraftPlan({
       plan: {

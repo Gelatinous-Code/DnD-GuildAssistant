@@ -53,6 +53,14 @@ For `/week signup`, **GM** and **Player** corrections require **Tier 1**, **Tier
 2**, or **Tier 3**. **Backup GM** records emergency coverage without adding a
 planned table; **Withdraw** removes the member from the week. See
 [Weekly game tiers](game-tiers.md).
+A member may be both a **Player** and a **Backup GM** for the same week. Adding
+backup availability keeps the player's tier and original signup position.
+The GM and player signup cards withdraw those commitments independently, so a
+member can stop being a backup without losing their player signup, or stop
+playing while remaining available as a backup. A **primary GM** cannot also be
+a player; they must withdraw the conflicting commitment first. An organizer
+can still make a direct audited correction with `/week signup`.
+
 
 ## Attendance and DM rewards
 

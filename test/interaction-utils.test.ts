@@ -72,6 +72,16 @@ describe("interaction utilities", () => {
       eventId: "event-id",
       action: "backup",
     });
+    expect(parseComponentId("guild:signup:withdraw_gm:event-id")).toEqual({
+      kind: "signup",
+      eventId: "event-id",
+      action: "withdraw_gm",
+    });
+    expect(parseComponentId("guild:signup:withdraw_player:event-id")).toEqual({
+      kind: "signup",
+      eventId: "event-id",
+      action: "withdraw_player",
+    });
     expect(parseComponentId("guild:table:join:plan-id:table-id")).toEqual({
       kind: "table",
       planId: "plan-id",

@@ -121,7 +121,13 @@ export class UserFacingError extends Error {
 export type GuildComponent =
   | {
       kind: "signup";
-      action: "gm" | "player" | "backup" | "withdraw";
+      action:
+        | "gm"
+        | "player"
+        | "backup"
+        | "withdraw"
+        | "withdraw_gm"
+        | "withdraw_player";
       eventId: string;
       gameTier?: GameTier;
     }
@@ -159,7 +165,9 @@ export function parseComponentId(customId: string | undefined): GuildComponent |
     (parts[2] === "gm" ||
       parts[2] === "player" ||
       parts[2] === "backup" ||
-      parts[2] === "withdraw") &&
+      parts[2] === "withdraw" ||
+      parts[2] === "withdraw_gm" ||
+      parts[2] === "withdraw_player") &&
     parts[3]
   ) {
     return { kind: "signup", action: parts[2], eventId: parts[3] };

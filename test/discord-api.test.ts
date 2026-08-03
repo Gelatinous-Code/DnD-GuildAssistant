@@ -615,12 +615,13 @@ describe("Discord message rendering", () => {
       "guild:signup:gm:2:event-tiered",
       "guild:signup:gm:3:event-tiered",
       "guild:signup:backup:event-tiered",
-      "guild:signup:withdraw:event-tiered",
+      "guild:signup:withdraw_gm:event-tiered",
     ]);
     expect(message.components?.[1].components.map((button) => button.custom_id)).toEqual([
       "guild:signup:player:1:event-tiered",
       "guild:signup:player:2:event-tiered",
       "guild:signup:player:3:event-tiered",
+      "guild:signup:withdraw_player:event-tiered",
     ]);
   });
 

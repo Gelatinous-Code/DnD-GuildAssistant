@@ -614,10 +614,9 @@ export class WeekService {
     event: WeeklyEvent,
     audience: "combined" | "gm" | "player" = "combined",
   ): Promise<DiscordMessagePayload> {
-    const [gms, players] = await Promise.all([
-      this.repository.listActiveSignups(event.eventId, "gm"),
-      this.repository.listActiveSignups(event.eventId, "player"),
-    ]);
+    const signups = await this.repository.listActiveSignups(event.eventId);
+    const gms = signups.filter((signup) => signup.signupKind === "gm");
+    const players = signups.filter((signup) => signup.signupKind === "player");
     const now = this.now();
     const playerSignupOpensAt = event.playerSignupOpensAt ?? event.signupOpensAt;
     const gmSignupEnabled = event.status === "open" && audience !== "player";
@@ -629,19 +628,19 @@ export class WeekService {
     const description =
       audience === "gm"
         ? gmSignupEnabled
-          ? "Choose the tier you plan to run, or volunteer as a backup GM. This post is routed to the guild's GM signup channel."
+          ? "Choose the tier you plan to run, or volunteer as a backup GM. Players may also volunteer as backups; primary GMs cannot also play."
           : "GM signup is closed. Withdraw only if you are dropping from this week's games."
         : audience === "player"
           ? playerSignupEnabled
-            ? "Choose your character's tier to play. Signup order reserves capacity within that tier until open seating."
+            ? "Choose your character's tier to play. Backup GMs may also play; primary GMs must withdraw from running first."
             : "Player signup is not open yet."
           : playerSignupEnabled
-            ? "Choose a tier to run or play. Player signup order reserves capacity within that tier until open seating."
+            ? "Choose a tier to run or play, or volunteer as a backup GM. A backup may also play; a primary GM may not."
             : gmSignupEnabled
               ? "GM signup is open. Player interest opens at the time shown below."
               : "Tables are published. Withdraw only if you are dropping from this week's games.";
     const primaryGms = gms.filter((signup) => signup.gmCommitment !== "backup");
-    const backupGms = gms.filter((signup) => signup.gmCommitment === "backup");
+    const backupGms = signups.filter((signup) => signup.gmCommitment === "backup");
     const visibleSignups =
       audience === "gm"
         ? primaryGms
@@ -781,7 +780,12 @@ export class WeekService {
     eventId: string;
     userId: string;
     displayName: string;
-    action: SignupKind | "backup" | "withdraw";
+    action:
+      | SignupKind
+      | "backup"
+      | "withdraw"
+      | "withdraw_gm"
+      | "withdraw_player";
     gameTier?: GameTier;
   }): Promise<{ event: WeeklyEvent; payload: DiscordMessagePayload; message: string }> {
     const event = await this.repository.getWeeklyEvent(input.eventId);
@@ -792,7 +796,16 @@ export class WeekService {
     const now = this.now();
     let message: string;
 
-    if (input.action === "withdraw") {
+    const withdrawalScope =
+      input.action === "withdraw_gm"
+        ? "gm"
+        : input.action === "withdraw_player"
+          ? "player"
+          : input.action === "withdraw"
+            ? "all"
+            : null;
+
+    if (withdrawalScope) {
       if (
         !["open", "locked", "planned", "published"].includes(event.status) ||
         now >= event.tableSelectionClosesAt
@@ -802,14 +815,69 @@ export class WeekService {
         );
       }
       const existing = await this.repository.getSignup(event.eventId, input.userId);
-      if (event.status === "published" && existing?.signupKind === "gm") {
+      const active = existing?.status === "active" ? existing : null;
+      const isPrimaryGm =
+        active?.signupKind === "gm" && active.gmCommitment !== "backup";
+      if (
+        event.status === "published" &&
+        isPrimaryGm &&
+        (withdrawalScope === "gm" || withdrawalScope === "all")
+      ) {
         throw new UserFacingError(
-          "A published GM change affects an entire table. Please contact an organizer.",
+          "A published primary-GM change affects an entire table. Please contact an organizer.",
         );
       }
-      const changed = await this.repository.withdrawSignup(input.eventId, input.userId);
-      message = changed ? "You dropped from this week's games." : "You were not actively signed up.";
-      if (changed && event.status === "published") {
+
+      let playerWithdrawn = false;
+      if (withdrawalScope === "gm") {
+        if (active?.signupKind === "player" && active.gmCommitment === "backup") {
+          await this.repository.saveSignup({
+            eventId: event.eventId,
+            userId: input.userId,
+            displayName: input.displayName,
+            signupKind: "player",
+            gameTier: active.gameTier,
+            gmCommitment: null,
+            source: "native",
+            signedUpAt: active.signedUpAt,
+          });
+          message = `Removed your backup GM availability. You are still signed up to play ${gameTierLabel(active.gameTier ?? 1)}.`;
+        } else if (active?.signupKind === "gm") {
+          await this.repository.withdrawSignup(input.eventId, input.userId);
+          message = "You withdrew from GM duty this week.";
+        } else {
+          message = "You were not actively signed up as a GM or backup GM.";
+        }
+      } else if (withdrawalScope === "player") {
+        if (active?.signupKind === "player" && active.gmCommitment === "backup") {
+          await this.repository.saveSignup({
+            eventId: event.eventId,
+            userId: input.userId,
+            displayName: input.displayName,
+            signupKind: "gm",
+            gameTier: null,
+            gmCommitment: "backup",
+            source: "native",
+            signedUpAt: active.signedUpAt,
+          });
+          playerWithdrawn = true;
+          message = "You withdrew as a player and remain available as a backup GM.";
+        } else if (active?.signupKind === "player") {
+          await this.repository.withdrawSignup(input.eventId, input.userId);
+          playerWithdrawn = true;
+          message = "You dropped from this week's games.";
+        } else {
+          message = "You were not actively signed up as a player.";
+        }
+      } else {
+        const changed = await this.repository.withdrawSignup(input.eventId, input.userId);
+        playerWithdrawn = Boolean(changed && active?.signupKind === "player");
+        message = changed
+          ? "You dropped from this week's games."
+          : "You were not actively signed up.";
+      }
+
+      if (playerWithdrawn && event.status === "published") {
         const plan = await this.repository.getCurrentPlan(event.eventId);
         if (plan?.status === "published") {
           const result = await this.repository.withdrawAssignmentAndPromote(
@@ -851,32 +919,68 @@ export class WeekService {
         event.eventId,
         input.userId,
       );
+      const activePrevious =
+        previousSignup?.status === "active" ? previousSignup : null;
+      const signupAction = input.action as SignupKind | "backup";
+      const previousIsPrimaryGm =
+        activePrevious?.signupKind === "gm" &&
+        activePrevious.gmCommitment !== "backup";
+      if (signupAction === "player" && previousIsPrimaryGm) {
+        throw new UserFacingError(
+          "You are signed up to run a game this week. Withdraw from GM duty before signing up as a player.",
+        );
+      }
+      if (signupAction === "gm" && activePrevious?.signupKind === "player") {
+        throw new UserFacingError(
+          "You are signed up to play this week. Withdraw as a player before becoming a primary GM. You may volunteer as a backup GM without withdrawing.",
+        );
+      }
+
+      const signupKind: SignupKind =
+        signupAction === "backup"
+          ? activePrevious?.signupKind === "player"
+            ? "player"
+            : "gm"
+          : signupAction;
+      const gameTier =
+        signupAction === "backup"
+          ? activePrevious?.signupKind === "player"
+            ? activePrevious.gameTier ?? selectedTier
+            : null
+          : selectedTier;
+      const gmCommitment =
+        signupAction === "gm"
+          ? "primary"
+          : signupAction === "backup" ||
+              activePrevious?.gmCommitment === "backup"
+            ? "backup"
+            : null;
       const publishedTierChange =
         event.status === "published" &&
-        input.action === "player" &&
-        previousSignup?.status === "active" &&
-        previousSignup.signupKind === "player" &&
-        previousSignup.gameTier !== selectedTier;
-      const signupKind: SignupKind =
-        input.action === "backup" ? "gm" : input.action;
+        signupAction === "player" &&
+        activePrevious?.signupKind === "player" &&
+        activePrevious.gameTier !== selectedTier;
+      const preserveSignupOrder =
+        activePrevious &&
+        activePrevious.signupKind === signupKind;
       await this.repository.saveSignup({
         eventId: input.eventId,
         userId: input.userId,
         displayName: input.displayName,
         signupKind,
-        gameTier: input.action === "backup" ? null : selectedTier,
-        gmCommitment:
-          input.action === "gm"
-            ? "primary"
-            : input.action === "backup"
-              ? "backup"
-              : null,
+        gameTier,
+        gmCommitment,
         source: "native",
+        ...(preserveSignupOrder
+          ? { signedUpAt: activePrevious.signedUpAt }
+          : {}),
       });
       if (input.action === "gm") {
         message = `Signed up to run ${gameTierLabel(selectedTier)}.`;
-      } else if (input.action === "backup") {
-        message = "Signed up as a backup GM. You do not count as a planned table unless an organizer moves you into a tier.";
+      } else if (signupAction === "backup") {
+        message = signupKind === "player"
+          ? `You are still signed up to play ${gameTierLabel(gameTier ?? selectedTier)} and are now also available as a backup GM.`
+          : "Signed up as a backup GM. You do not count as a planned table unless an organizer moves you into a tier.";
       } else if (event.status === "published") {
         const plan = await this.repository.getCurrentPlan(event.eventId);
         if (!plan || plan.status !== "published") {
@@ -916,9 +1020,14 @@ export class WeekService {
             ? `Signed up to play ${gameTierLabel(selectedTier)}. An open weekly reservation is yours; choose a table in that tier with space.`
             : `Signed up to play ${gameTierLabel(selectedTier)}. That tier's planned seats are reserved, so you are on its waitlist. You will be privately notified if a reservation opens.`;
       } else {
-        message = `Signed up to play ${gameTierLabel(selectedTier)}.`;
+        message = gmCommitment === "backup"
+          ? `Signed up to play ${gameTierLabel(selectedTier)} and kept your backup GM availability.`
+          : `Signed up to play ${gameTierLabel(selectedTier)}.`;
       }
     }
+    const resultingSignup = await this.repository.getSignup(event.eventId, input.userId);
+    const activeResult =
+      resultingSignup?.status === "active" ? resultingSignup : null;
     await this.repository.appendAudit({
       guildId: event.guildId,
       eventId: event.eventId,
@@ -927,16 +1036,9 @@ export class WeekService {
       entityType: "signup",
       entityId: input.userId,
       details: {
-        gameTier:
-          input.action === "withdraw" || input.action === "backup"
-            ? null
-            : input.gameTier ?? 1,
-        gmCommitment:
-          input.action === "gm"
-            ? "primary"
-            : input.action === "backup"
-              ? "backup"
-              : null,
+        signupKind: activeResult?.signupKind ?? null,
+        gameTier: activeResult?.gameTier ?? null,
+        gmCommitment: activeResult?.gmCommitment ?? null,
       },
     });
     const latest = (await this.repository.getWeeklyEvent(event.eventId)) ?? event;

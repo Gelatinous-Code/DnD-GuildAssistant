@@ -589,7 +589,13 @@ function componentId(parts: readonly string[]): string {
   return customId;
 }
 
-export type SignupAction = "gm" | "player" | "backup" | "withdraw";
+export type SignupAction =
+  | "gm"
+  | "player"
+  | "backup"
+  | "withdraw"
+  | "withdraw_gm"
+  | "withdraw_player";
 
 export function signupCustomId(
   eventId: string,
@@ -754,8 +760,8 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
                   {
                     type: ComponentType.Button,
                     style: ButtonStyle.Danger,
-                    custom_id: signupCustomId(input.eventId, "withdraw"),
-                    label: "Withdraw",
+                    custom_id: signupCustomId(input.eventId, "withdraw_gm"),
+                    label: audience === "combined" ? "Withdraw GM" : "Withdraw",
                     disabled: !withdrawEnabled,
                   },
                 ],
@@ -770,15 +776,13 @@ export function renderSignupMessage(input: SignupMessageInput): DiscordMessagePa
                     label: `Play T${definition.tier}`,
                     disabled: !playerSignupEnabled,
                   })),
-                  ...(audience === "player"
-                    ? [{
-                        type: ComponentType.Button,
-                        style: ButtonStyle.Danger,
-                        custom_id: signupCustomId(input.eventId, "withdraw"),
-                        label: "Withdraw",
-                        disabled: !withdrawEnabled,
-                      }]
-                    : []),
+                  {
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Danger,
+                    custom_id: signupCustomId(input.eventId, "withdraw_player"),
+                    label: audience === "combined" ? "Withdraw Player" : "Withdraw",
+                    disabled: !withdrawEnabled,
+                  },
                 ],
               }]),
             ]
