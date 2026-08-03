@@ -344,6 +344,8 @@ describe("D1 persistence model", () => {
       maxPlayersPerTable: 6,
       schedulingEnabled: true,
       autoPublishEnabled: true,
+      gmRoleId: "must-be-ignored",
+      roleSyncEnabled: true,
     });
 
     expect(saved.announcementChannelId).toBe("channel-1");
@@ -351,9 +353,13 @@ describe("D1 persistence model", () => {
     expect(saved.preferredPlayersPerTable).toBe(6);
     expect(saved.schedulingEnabled).toBe(true);
     expect(saved.autoPublishEnabled).toBe(true);
+    expect(saved.gmRoleId).toBeNull();
+    expect(saved.roleSyncEnabled).toBe(false);
     expect(fake.statements[1]?.sql).not.toContain("guild-1");
     expect(fake.statements[1]?.values).toContain("channel-1");
     expect(fake.statements[1]?.values).toContain(7);
+    expect(fake.statements[1]?.values.slice(7, 9)).toEqual([1, null]);
+    expect(fake.statements[1]?.values[21]).toBe(0);
   });
 
   it("explicitly clears configured roles without treating omitted roles as null", async () => {

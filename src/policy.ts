@@ -143,12 +143,6 @@ const DISCORD_PERMISSIONS = [
     fix: "Allow Read Message History so published cards can be updated.",
   },
   {
-    name: "Manage Roles",
-    bit: 1n << 28n,
-    required: true,
-    fix: "Grant Manage Roles and place the assistant role above the weekly GM role.",
-  },
-  {
     name: "Attach Files",
     bit: 1n << 15n,
     required: false,
@@ -212,9 +206,7 @@ export function effectiveChannelPermissions(input: {
 export function diagnoseChannelPermissions(
   permissions: bigint,
 ): PermissionDiagnostic[] {
-  return DISCORD_PERMISSIONS.filter(
-    (permission) => permission.name !== "Manage Roles",
-  ).map((permission) => {
+  return DISCORD_PERMISSIONS.map((permission) => {
     const granted = (permissions & permission.bit) !== 0n;
     return {
       name: permission.name,
@@ -226,7 +218,6 @@ export function diagnoseChannelPermissions(
 
 export function diagnoseInteractionPermissions(
   permissionString: string | undefined,
-  options: { roleSyncEnabled?: boolean } = {},
 ): PermissionDiagnostic[] {
   let permissions = 0n;
   try {
@@ -243,13 +234,9 @@ export function diagnoseInteractionPermissions(
 
   return DISCORD_PERMISSIONS.map((permission) => {
     const granted = (permissions & permission.bit) !== 0n;
-    const required =
-      permission.name === "Manage Roles"
-        ? Boolean(options.roleSyncEnabled)
-        : permission.required;
     return {
       name: permission.name,
-      level: granted ? "pass" : required ? "failure" : "warning",
+      level: granted ? "pass" : permission.required ? "failure" : "warning",
       detail: granted ? "Granted." : permission.fix,
     };
   });

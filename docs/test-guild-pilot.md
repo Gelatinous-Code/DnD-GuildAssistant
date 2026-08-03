@@ -239,7 +239,7 @@ than expected before `/week open`, generate fresh values.
 
 - [ ] Enable Review without changing any custom reminder rule:
 
-      `/guild automation mode:Review before publish confirm:True role_sync:False`
+      `/guild automation mode:Review before publish confirm:True`
 
 - [ ] Allow up to two Cron intervals (30 minutes) for the scheduled event to be
       created and opened. Members A and B click **Play T1** and Member C clicks
@@ -274,7 +274,7 @@ than expected before `/week open`, generate fresh values.
       and update only `weekday` and `time` with `/guild setup`.
 - [ ] Enable Autopilot without changing reminders:
 
-      `/guild automation mode:Autopilot confirm:True role_sync:False`
+      `/guild automation mode:Autopilot confirm:True`
 
 - [ ] Allow up to two Cron intervals for the event to be created/opened. Run
       `/week status` and verify the recent operation record. This is the required
@@ -288,13 +288,13 @@ than expected before `/week open`, generate fresh values.
       must be refused. Restore Send Messages and require `/guild doctor` to pass.
 - [ ] Enable Review again:
 
-      `/guild automation mode:Review before publish confirm:True role_sync:False`
+      `/guild automation mode:Review before publish confirm:True`
 
       Because the lock deadline is now past, allow one Cron interval and verify
       `/week status` shows the recovered `lock-plan` operation and a planned
       draft.
 - [ ] Switch that planned event back to Autopilot with
-      `/guild automation mode:Autopilot confirm:True role_sync:False`. Allow one
+      `/guild automation mode:Autopilot confirm:True`. Allow one
       Cron interval and verify `/week status` shows one successful publish
       operation and exactly one public table message. Allow one additional Cron
       interval and verify no duplicate appears. Finish with

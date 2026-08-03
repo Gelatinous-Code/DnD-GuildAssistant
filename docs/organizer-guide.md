@@ -93,12 +93,12 @@ member message contents.
 
 ## Optional features
 
-Reminders and the temporary Weekly GM role are not required for the weekly
-workflow. Add them only after the basic week works:
+Role-mention reminders are not required for the weekly workflow. Add them only
+after the basic week works:
 
 - `/reminder configure` saves a reminder and privately previews it.
-- `/roles sync dry_run:True` previews role changes without applying them.
+- Member roles remain an admin task; the assistant never assigns or removes them.
 
-Use [Discord server setup](guild-setup.md) for permissions and role order. Use
+Use [Discord server setup](guild-setup.md) for permissions. Use
 the [Discord command reference](discord-command-reference.md) when you need an
 advanced lifecycle or recovery command.

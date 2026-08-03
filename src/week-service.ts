@@ -184,8 +184,7 @@ export class WeekService {
       "## Guild Assistant status",
       "**Player signup and tables:** " + (config.eventChannelId ? "<#" + config.eventChannelId + ">" : "missing"),
       "**GM signup channel:** " + (config.gmSignupChannelId ? "<#" + config.gmSignupChannelId + ">" : "same as player signup"),
-      "**Weekly GM role:** " +
-        (config.gmRoleId ? "<@&" + config.gmRoleId + ">" : "optional; not configured"),
+      "**Member roles:** admin-managed; the assistant never changes them",
       "**Reminder role:** " +
         (config.reminderRoleId ? "<@&" + config.reminderRoleId + ">" : "not configured"),
       "**Time zone:** " + config.timezone,
@@ -214,9 +213,7 @@ export class WeekService {
       "**Automation:** scheduling " +
         (config.schedulingEnabled ? "on" : "off") +
         ", auto-publish " +
-        (config.autoPublishEnabled ? "on" : "off") +
-        ", role sync " +
-        (config.roleSyncEnabled ? "on" : "off"),
+        (config.autoPublishEnabled ? "on" : "off"),
     ];
     if (!event) {
       lines.push("**Current week:** none");

@@ -49,12 +49,6 @@ import {
   reminderCapacitySummary,
   scheduledReminderKey,
 } from "./reminder-service";
-import {
-  formatRoleDiagnostics,
-  formatRoleReport,
-  requireSuccessfulRoleReconciliation,
-  RoleService,
-} from "./role-service";
 import { RosterNotificationService } from "./roster-notification-service";
 import {
   NEW_DAWN_CADENCE,
@@ -187,9 +181,7 @@ function setupDashboard(config: GuildConfig | null): string {
     "**Player capacity:** each tier reserves its own seats in signup order. Extra players wait within that tier.",
     "**Drops:** before open seating, the first waitlisted player in the same tier inherits the reservation and receives a private message.",
     "**No table chosen:** no penalty; at open seating, every remaining spot is first-come until game time.",
-    `${config?.gmRoleId ? "✅" : "➖"} **Weekly GM role (optional):** ${
-      config?.gmRoleId ? `<@&${config.gmRoleId}>` : "not configured"
-    }`,
+    "🛡️ **Member roles:** managed by server admins; the assistant never assigns or removes them.",
     `${config?.reminderRoleId ? "✅" : "➖"} **Reminder role (optional):** ${
       config?.reminderRoleId ? `<@&${config.reminderRoleId}>` : "channel-only reminders are available"
     }`,
@@ -340,7 +332,6 @@ function services(env: Env): {
   repository: GuildRepository;
   discord: DiscordRestClient;
   week: WeekService;
-  roles: RoleService;
   reminders: ReminderService;
 } {
   const repository = new GuildRepository(env.DB);
@@ -349,7 +340,6 @@ function services(env: Env): {
     repository,
     discord,
     week: new WeekService(repository, discord),
-    roles: new RoleService(repository, discord),
     reminders: new ReminderService(repository, discord),
   };
 }
@@ -358,7 +348,6 @@ type RecoverableSchedulerAction =
   | "open"
   | "lock-plan"
   | "publish"
-  | "roles"
   | "finalize"
   | "archive";
 
@@ -478,12 +467,10 @@ function setupSummary(config: GuildConfig): string {
     "**Table sizes:** " + config.tableMinSize + " / " +
       config.tablePreferredSize + " / " + config.tableMaxSize,
     "**Player capacity:** signup-order reservations and waitlists are separate for each tier, followed by first-come open seating within that tier.",
-    "**Weekly GM role:** " +
-      (config.gmRoleId ? "<@&" + config.gmRoleId + ">" : "optional; not configured"),
+    "**Member roles:** admin-managed; the assistant never changes them",
     "**Reminder role:** " +
       (config.reminderRoleId ? "<@&" + config.reminderRoleId + ">" : "not set"),
-    "**Automation:** " + automationMode(config) + ", GM role sync " +
-      (config.roleSyncEnabled ? "on" : "paused"),
+    "**Automation:** " + automationMode(config),
   ].join("\n");
 }
 
@@ -494,7 +481,7 @@ async function handleGuildCommand(
   requireAdmin(interaction);
   const guildId = requireGuild(interaction);
   const invocation = parseCommand(interaction);
-  const { repository, discord, week, roles, reminders } = services(env);
+  const { repository, discord, week, reminders } = services(env);
 
   if (invocation.subcommand === "setup") {
     const current = await repository.getGuildConfig(guildId);
@@ -525,7 +512,7 @@ async function handleGuildCommand(
     const channelId = selectedChannelId ?? current?.eventChannelId;
     if (!channelId) {
       throw new UserFacingError(
-        "Choose an operations channel once. The Weekly GM role and every other setting are optional.",
+        "Choose an operations channel once. Every other setting is optional.",
       );
     }
     if (selectedChannelId) {
@@ -540,16 +527,11 @@ async function handleGuildCommand(
       }
     }
 
-    const selectedGmRoleId = stringOption(invocation, "gm_role");
     const selectedReminderRoleId =
       stringOption(invocation, "reminder_role") ?? presetRouting?.playerReminderRoleId;
     const selectedAdminRoleId = stringOption(invocation, "admin_role") ?? presetRouting?.adminRoleId;
-    const clearGmRole = booleanOption(invocation, "clear_gm_role") === true;
     const clearReminderRole = booleanOption(invocation, "clear_reminder_role") === true;
     const clearAdminRole = booleanOption(invocation, "clear_admin_role") === true;
-    if (clearGmRole && selectedGmRoleId) {
-      throw new UserFacingError("Choose gm_role or clear_gm_role, not both.");
-    }
     if (clearReminderRole && selectedReminderRoleId) {
       throw new UserFacingError("Choose reminder_role or clear_reminder_role, not both.");
     }
@@ -606,18 +588,13 @@ async function handleGuildCommand(
       throw new UserFacingError("Configuration was not saved:\n• " + errors.join("\n• "));
     }
 
-    if (clearGmRole) {
-      const cleanup = await roles.cleanupAllLeasedRoles(guildId);
-      requireSuccessfulRoleReconciliation(cleanup, "Weekly GM role cleanup");
-    }
-
     const config = await repository.saveGuildConfig({
       guildId,
       eventChannelId: selectedChannelId,
       tableChannelId: selectedChannelId,
       gmSignupChannelId: presetRouting?.gmSignupChannelId,
       reminderChannelId: selectedChannelId,
-      gmRoleId: clearGmRole ? null : selectedGmRoleId,
+      gmRoleId: null,
       adminRoleId: clearAdminRole ? null : selectedAdminRoleId,
       reminderRoleId: clearReminderRole ? null : selectedReminderRoleId,
       timezone,
@@ -635,12 +612,9 @@ async function handleGuildCommand(
       tableMinSize,
       tablePreferredSize,
       tableMaxSize,
-      roleSyncEnabled: clearGmRole ? false : undefined,
+      roleSyncEnabled: false,
     });
-    const permissionChecks = diagnoseInteractionPermissions(interaction.app_permissions, {
-      roleSyncEnabled: config.roleSyncEnabled,
-    });
-    const roleChecks = config.gmRoleId ? await roles.diagnose(guildId) : null;
+    const permissionChecks = diagnoseInteractionPermissions(interaction.app_permissions);
     const problems = [
       ...permissionChecks
         .filter((check) => check.level !== "pass")
@@ -650,15 +624,6 @@ async function handleGuildCommand(
             check.name +
             ": " +
             check.detail,
-        ),
-      ...(roleChecks?.items ?? [])
-        .filter((check) => check.status !== "pass")
-        .map(
-          (check) =>
-            (check.status === "fail" && config.roleSyncEnabled ? "❌ " : "⚠️ ") +
-            check.title +
-            ": " +
-            (check.remediation ?? check.detail),
         ),
     ];
     return ephemeral(boundedDiscordContent(
@@ -686,10 +651,6 @@ async function handleGuildCommand(
       throw new UserFacingError("Set confirm to True to change automation mode.");
     }
 
-    const requestedRoleSync =
-      mode === "paused"
-        ? false
-        : (booleanOption(invocation, "role_sync") ?? config.roleSyncEnabled);
     const reminderEnabled = booleanOption(invocation, "reminders");
     if (mode !== "paused") {
       const problems = await coreAutomationProblems(discord, guildId, config);
@@ -697,22 +658,6 @@ async function handleGuildCommand(
         throw new UserFacingError(
           "Automation remains paused. Fix these core checks first:\n• " + problems.join("\n• "),
         );
-      }
-      if (requestedRoleSync) {
-        if (!config.gmRoleId) {
-          throw new UserFacingError(
-            "Role sync needs a normal Weekly GM role. Configure gm_role or leave role_sync False.",
-          );
-        }
-        const report = await roles.diagnose(guildId);
-        if (!report.ready) {
-          const failures = report.items
-            .filter((item) => item.status === "fail")
-            .map((item) => item.remediation ?? item.detail);
-          throw new UserFacingError(
-            "Role sync remains paused:\n• " + failures.join("\n• "),
-          );
-        }
       }
     }
 
@@ -744,7 +689,7 @@ async function handleGuildCommand(
       guildId,
       schedulingEnabled: mode !== "paused",
       autoPublishEnabled: mode === "autopilot",
-      roleSyncEnabled: requestedRoleSync,
+      roleSyncEnabled: false,
     });
     await repository.appendAudit({
       guildId,
@@ -752,11 +697,11 @@ async function handleGuildCommand(
       action: "guild.automation-changed",
       entityType: "guild_config",
       entityId: guildId,
-      details: { mode, roleSyncEnabled: requestedRoleSync, reminderEnabled },
+      details: { mode, roleManagement: "admin-owned", reminderEnabled },
     });
     return ephemeral(
       `${mode === "paused" ? "⏸️" : "✅"} Automation mode is now **${automationMode(saved)}**.\n` +
-        `GM role sync is **${saved.roleSyncEnabled ? "on" : "paused"}**.` +
+        "Member roles remain admin-managed and are never changed by the assistant." +
         (reminderEnabled === undefined
           ? " Reminder configuration was unchanged."
           : ` Default reminders are **${reminderEnabled ? "on" : "off"}**.`),
@@ -816,9 +761,7 @@ async function handleGuildCommand(
         }
       }),
     );
-    const permissionResults = diagnoseInteractionPermissions(interaction.app_permissions, {
-      roleSyncEnabled: config.roleSyncEnabled,
-    }).map(
+    const permissionResults = diagnoseInteractionPermissions(interaction.app_permissions).map(
       (check) =>
         (check.level === "pass" ? "✅" : check.level === "warning" ? "⚠️" : "❌") +
         " **" +
@@ -848,10 +791,8 @@ async function handleGuildCommand(
             : " exists but cannot notify members. Enable “Allow anyone to @mention this role”."),
       ];
     });
-    const roleReport = config.gmRoleId ? await roles.diagnose(guildId) : null;
     const coreProblems = await coreAutomationProblems(discord, guildId, config);
     const coreReady = coreProblems.length === 0 && channelChecks.every((check) => check.ready);
-    const roleReady = !config.roleSyncEnabled || Boolean(roleReport?.ready);
     return ephemeral(
       boundedDiscordContent([
         "## Guild Assistant doctor",
@@ -866,14 +807,7 @@ async function handleGuildCommand(
         config.autoPublishEnabled
           ? "✅ **Automatic publishing:** on."
           : "➖ **Automatic publishing:** off; an organizer reviews and runs /week publish.",
-        config.roleSyncEnabled && roleReady
-          ? "✅ **Weekly GM role sync:** on and ready."
-          : config.roleSyncEnabled
-            ? "❌ **Weekly GM role sync:** on but needs repair."
-            : "➖ **Weekly GM role sync:** optional and paused.",
-        ...(roleReport
-          ? ["", "**Weekly GM role diagnostics**", formatRoleDiagnostics(roleReport, false)]
-          : []),
+        "🛡️ **Member roles:** admin-managed; the assistant cannot assign or remove them.",
         "",
         "**Configured resources**",
         ...channelChecks.map((check) => check.text),
@@ -902,7 +836,7 @@ async function handleWeekCommand(
   const guildId = requireGuild(interaction);
   const actorUserId = invokingUserId(interaction);
   const invocation = parseCommand(interaction);
-  const { repository, discord, week, roles, reminders } = services(env);
+  const { repository, discord, week, reminders } = services(env);
 
   if (invocation.subcommand === "open") {
     const event = await week.openWeek({
@@ -979,15 +913,6 @@ async function handleWeekCommand(
             "\n✅ Autopilot rebuilt and published revision " +
             published.bundle.plan.generation +
             ".";
-          if (config.roleSyncEnabled) {
-            try {
-              automationText += "\n" + formatRoleReport(await roles.sync(guildId));
-            } catch (error) {
-              automationText +=
-                "\n⚠️ Tables were updated, but GM role sync needs repair: " +
-                (error instanceof Error ? error.message : String(error));
-            }
-          }
         } catch (error) {
           correctionWarning = undefined;
           automationText =
@@ -1034,23 +959,12 @@ async function handleWeekCommand(
     await reconcilePriorityAfterPublish(
       env, result.event.eventId, result.bundle.plan.planId,
     );
-    let roleText = "";
-    const config = await repository.getGuildConfig(guildId);
-    if (config?.roleSyncEnabled) {
-      try {
-        roleText = "\n" + formatRoleReport(await roles.sync(guildId));
-      } catch (error) {
-        roleText =
-          "\n⚠️ Tables published, but GM role sync needs repair: " +
-          (error instanceof Error ? error.message : String(error));
-      }
-    }
     return ephemeral(
       "✅ Published " +
         result.bundle.tables.length +
         " tables." +
         (result.links.length ? "\n" + result.links.join("\n") : "") +
-      roleText,
+        "\nMember roles remain admin-managed.",
     );
   }
   if (invocation.subcommand === "export") {
@@ -1109,13 +1023,7 @@ async function handleWeekCommand(
     const current = await repository.getCurrentWeeklyEvent(guildId);
     if (current) await settlePriorityForEvent(env, current);
     await week.archiveWeek(guildId, actorUserId);
-    let roleText = "⚠️ GM role sync is paused; no Discord roles were changed.";
-    try {
-      roleText = formatRoleReport(await roles.sync(guildId));
-    } catch (error) {
-      if (!(error instanceof UserFacingError)) throw error;
-    }
-    return ephemeral("📦 Week archived.\n" + roleText);
+    return ephemeral("📦 Week archived. Member roles were not changed.");
   }
   if (invocation.subcommand === "cancel") {
     const reason = stringOption(invocation, "reason") ?? "";
@@ -1126,15 +1034,9 @@ async function handleWeekCommand(
     if (!current) throw new UserFacingError("There is no active week to cancel.");
     await cancelPriorityForEvent(
       env, current, actorUserId ?? interaction.id ?? "discord-interaction", reason);
-    let roleText = "⚠️ GM role sync is paused; no Discord roles were changed.";
     const event = await week.cancelWeek(guildId, actorUserId, reason);
-    try {
-      roleText = formatRoleReport(await roles.sync(guildId));
-    } catch (error) {
-      if (!(error instanceof UserFacingError)) throw error;
-    }
     return ephemeral(
-      "🛑 Cancelled **" + event.title + "**.\n" + roleText,
+      "🛑 Cancelled **" + event.title + "**. Member roles were not changed.",
     );
   }
   if (invocation.subcommand === "retry") {
@@ -1196,28 +1098,6 @@ async function handleWeekCommand(
           result.status +
           (result.reason ? " — " + result.reason : "."),
       );
-    }
-    if (step === "roles") {
-      const event = await repository.getCurrentWeeklyEvent(guildId);
-      if (!event) throw new UserFacingError("There is no active week.");
-      const plan = await repository.getCurrentPlan(event.eventId);
-      if (!plan || plan.status !== "published") {
-        throw new UserFacingError("The week has no authoritative published plan.");
-      }
-      let report = "";
-      const outcome = await runSchedulerRecovery(
-        repository,
-        event,
-        "roles",
-        actorUserId,
-        async () => {
-          const roleReport = await roles.sync(guildId);
-          report = formatRoleReport(roleReport);
-          requireSuccessfulRoleReconciliation(roleReport);
-        },
-        event.eventId + ":" + plan.planId,
-      );
-      return ephemeral("✅ GM role reconciliation is " + outcome + "." + (report ? "\n" + report : ""));
     }
     if (step === "finalize") {
       const event = await repository.getCurrentWeeklyEvent(guildId);
@@ -1303,21 +1183,6 @@ async function handleWeekCommand(
     return ephemeral("⏭️ Scheduled " + action + " step is " + result + ".");
   }
   throw new UserFacingError("Unknown /week subcommand.");
-}
-
-async function handleRolesCommand(
-  interaction: DiscordInteraction,
-  env: Env,
-): Promise<Response> {
-  requireAdmin(interaction);
-  const guildId = requireGuild(interaction);
-  const invocation = parseCommand(interaction);
-  if (invocation.subcommand !== "sync") throw new UserFacingError("Unknown /roles subcommand.");
-  const report = await services(env).roles.sync(
-    guildId,
-    booleanOption(invocation, "dry_run") ?? false,
-  );
-  return ephemeral(formatRoleReport(report));
 }
 
 async function handleReminderCommand(
@@ -1507,7 +1372,11 @@ async function executeDiscordInteraction(
     if (command === "help") return ephemeral(helpContent(interaction));
     if (command === "guild") return await handleGuildCommand(interaction, env);
     if (command === "week") return await handleWeekCommand(interaction, env);
-    if (command === "roles") return await handleRolesCommand(interaction, env);
+    if (command === "roles") {
+      return ephemeral(
+        "🛡️ Member roles are managed by server admins. This assistant never changes them.",
+      );
+    }
     if (command === "reminder") return await handleReminderCommand(interaction, env);
     const m6Response = await handleM6Command(interaction, env);
     if (m6Response !== null) return m6Response;
@@ -1630,7 +1499,7 @@ export async function handleDiscordInteraction(
 }
 
 export async function handleScheduled(env: Env, now = Date.now()): Promise<void> {
-  const { repository, discord, week, roles, reminders } = services(env);
+  const { repository, discord, week, reminders } = services(env);
   const rosterNotifications = new RosterNotificationService(repository, discord);
   await runScheduledTick(
     repository,
@@ -1650,9 +1519,6 @@ export async function handleScheduled(env: Env, now = Date.now()): Promise<void>
         );
       },
       openSeating: (event) => week.openSeating(event),
-      syncRoles: async (event) => {
-        requireSuccessfulRoleReconciliation(await roles.sync(event.guildId));
-      },
       finalizeEvent: async (event) => {
         await settlePriorityForEvent(env, event);
         await week.finalizeTables(event.guildId, event.eventId);
@@ -1660,10 +1526,6 @@ export async function handleScheduled(env: Env, now = Date.now()): Promise<void>
       archiveEvent: async (event) => {
         await settlePriorityForEvent(env, event);
         await week.archiveWeek(event.guildId, undefined, event.eventId);
-        const config = await repository.getGuildConfig(event.guildId);
-        if (config?.roleSyncEnabled) {
-          requireSuccessfulRoleReconciliation(await roles.sync(event.guildId));
-        }
       },
       enqueueEventReminders: async (event) => {
         await reminders.enqueuePreLockReminder(event);

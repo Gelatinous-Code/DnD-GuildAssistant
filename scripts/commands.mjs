@@ -64,11 +64,6 @@ export const commands = [
           },
           {
             type: 8,
-            name: "gm_role",
-            description: "Optional normal Weekly GM role; the bot role must be above it.",
-          },
-          {
-            type: 8,
             name: "reminder_role",
             description: "Optional role that scheduled signup reminders may mention.",
           },
@@ -175,11 +170,6 @@ export const commands = [
           },
           {
             type: 5,
-            name: "clear_gm_role",
-            description: "Clear the optional Weekly GM role and pause role synchronization.",
-          },
-          {
-            type: 5,
             name: "clear_reminder_role",
             description: "Clear the optional reminder audience role.",
           },
@@ -214,11 +204,6 @@ export const commands = [
           },
           {
             type: 5,
-            name: "role_sync",
-            description: "Also reconcile the optional Weekly GM role automatically.",
-          },
-          {
-            type: 5,
             name: "reminders",
             description: "Enable/disable the safe default pre-lock reminder rule.",
           },
@@ -232,7 +217,7 @@ export const commands = [
       {
         type: 1,
         name: "doctor",
-        description: "Check channels, permissions, roles, and role hierarchy.",
+        description: "Check channels, permissions, and notification roles.",
       },
     ],
   },
@@ -354,12 +339,12 @@ export const commands = [
       {
         type: 1,
         name: "publish",
-        description: "Publish the current draft and reconcile weekly GM roles.",
+        description: "Publish the current table draft.",
       },
       {
         type: 1,
         name: "archive",
-        description: "Archive the current week and remove assistant-owned GM roles.",
+        description: "Archive the current week without changing member roles.",
       },
       {
         type: 1,
@@ -404,7 +389,6 @@ export const commands = [
               { name: "Open signups", value: "open" },
               { name: "Lock signups", value: "lock" },
               { name: "Send reminder", value: "remind" },
-              { name: "Reconcile GM roles", value: "roles" },
               { name: "Finalize table manifest", value: "finalize" },
             ],
           },
@@ -441,27 +425,6 @@ export const commands = [
             type: 5,
             name: "confirm",
             description: "Must be True to record the skip.",
-            required: true,
-          },
-        ],
-      },
-    ],
-  },
-  {
-    name: "roles",
-    description: "Repair assistant-owned weekly roles.",
-    type: 1,
-    default_member_permissions: "32",
-    options: [
-      {
-        type: 1,
-        name: "sync",
-        description: "Preview or apply selected-GM role reconciliation.",
-        options: [
-          {
-            type: 5,
-            name: "dry_run",
-            description: "True previews; False applies role changes. Choose explicitly.",
             required: true,
           },
         ],

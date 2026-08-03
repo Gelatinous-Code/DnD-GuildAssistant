@@ -78,6 +78,7 @@ describe("permission diagnostics", () => {
     expect(diagnostics.find(({ name }) => name === "View Channels")?.level).toBe("pass");
     expect(diagnostics.find(({ name }) => name === "Embed Links")?.level).toBe("failure");
     expect(diagnostics.find(({ name }) => name === "Attach Files")?.level).toBe("warning");
+    expect(diagnostics.some(({ name }) => name === "Manage Roles")).toBe(false);
   });
 
   it("resolves everyone, combined-role, and member channel overwrites in Discord order", () => {

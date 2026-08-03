@@ -55,8 +55,9 @@ the test server:
 - scopes: `applications.commands` and `bot`;
 - core permissions: View Channels, Send Messages, Embed Links, and Read Message
   History;
-- Attach Files only if administrators will use `/week export`; and
-- Manage Roles only if the optional Weekly GM role will be automated.
+- Attach Files only if administrators will use `/week export`.
+
+Do not grant Manage Roles. Member role assignment remains an admin task.
 
 Do not grant Administrator. Open the application's install link, choose the real
 server, and authorize it.
@@ -79,24 +80,19 @@ Use [Discord server setup](guild-setup.md) for the full plain-language field and
 permission guide. Do not copy the example schedule without checking it against
 the guild's actual policy.
 
-Leave automation Paused while configuring optional reminders or roles. If using
-a Weekly GM role, require a correct preview:
-
-```text
-/roles sync dry_run:True
-```
+Leave automation Paused while configuring optional reminders. Member roles are
+managed manually by server admins.
 
 ## Start the first real week in Review
 
 Run:
 
 ```text
-/guild automation mode:Review before publish confirm:True role_sync:False
+/guild automation mode:Review before publish confirm:True
 ```
 
-Use `role_sync:True` only after its preview passes. Add `reminders:True` only
-when you want the built-in reminder; do not overwrite a custom reminder while
-changing mode.
+Add `reminders:True` only when you want the built-in reminder; do not overwrite
+a custom reminder while changing mode.
 
 For the first real week, organizers should:
 

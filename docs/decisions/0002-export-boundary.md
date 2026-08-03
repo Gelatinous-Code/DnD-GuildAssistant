@@ -13,8 +13,8 @@ created an external copy of member-identifying data.
 
 Guild Assistant now owns the operational path from native GM/player intent
 through deterministic planning, publication, player table choice and waitlists,
-game-time finalization, a final Discord manifest, role reconciliation, and
-archive. Requiring a spreadsheet or Google integration for that path would add
+game-time finalization, a final Discord manifest, and archive. Requiring a
+spreadsheet or Google integration for that path would add
 credentials, ownership, failure modes, and succession burden without improving
 the authoritative state.
 
