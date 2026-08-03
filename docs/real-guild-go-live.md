@@ -70,18 +70,18 @@ to the deployer. Do not continue by guessing at setup.
 From this point through activation, every action happens in Discord.
 
 1. Confirm `#gm-sign-up`, `#game-sign-ups`, `GM`, `Guild Player`, and `Administrator` retain those exact names.
-2. Run `/guild setup preset:Second Dawn Guild`.
-3. Run `/guild setup` without options and read all five weekly stages.
-4. Change any wrong day, time, time zone, duration, or table size.
-5. Run `/guild status`, then `/guild doctor`.
-6. Fix every ❌ for a feature you plan to use.
+2. Open the `GM`, `Guild Player`, and `Administrator` role settings and enable **Allow anyone to @mention this role**.
+3. Run `/guild setup preset:Second Dawn Guild`.
+4. Run `/guild setup` without options and read all five weekly stages.
+5. Change any wrong day, time, time zone, duration, or table size.
+6. Run `/guild status`, then `/guild doctor`.
+7. Fix every ❌ for a feature you plan to use.
 
 Use [Discord server setup](guild-setup.md) for the full plain-language field and
 permission guide. Do not copy the example schedule without checking it against
 the guild's actual policy.
 
-Leave automation Paused while configuring optional reminders. Member roles are
-managed manually by server admins.
+Leave automation Paused while configuring and checking notification roles.
 
 ## Start the first real week in Review
 

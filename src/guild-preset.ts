@@ -7,7 +7,7 @@ export interface GuildRoutingPreset {
   playerSignupChannelId: string;
   playerReminderRoleId: string;
   adminRoleId: string;
-  verifiedGmRoleId: string;
+  gmNotificationRoleId: string;
 }
 
 function normalizedName(value: string): string {
@@ -38,7 +38,7 @@ export function resolveSecondDawnPreset(
   return {
     gmSignupChannelId: requireUniqueNamed(messageChannels, "gm-sign-up", "text channel").id,
     playerSignupChannelId: requireUniqueNamed(messageChannels, "game-sign-ups", "text channel").id,
-    verifiedGmRoleId: requireUniqueNamed(roles, "GM", "role").id,
+    gmNotificationRoleId: requireUniqueNamed(roles, "GM", "role").id,
     playerReminderRoleId: requireUniqueNamed(roles, "Guild Player", "role").id,
     adminRoleId: requireUniqueNamed(roles, "Administrator", "role").id,
   };

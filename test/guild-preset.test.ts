@@ -40,7 +40,7 @@ describe("Second Dawn guild preset", () => {
       playerSignupChannelId: "100",
       playerReminderRoleId: "202",
       adminRoleId: "200",
-      verifiedGmRoleId: "201",
+      gmNotificationRoleId: "201",
     });
   });
 

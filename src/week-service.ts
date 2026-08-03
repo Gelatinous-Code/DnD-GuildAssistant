@@ -52,6 +52,21 @@ const WEEKDAY_NAMES = [
   "Sunday",
 ] as const;
 
+function gmSignupAnnouncement(
+  payload: DiscordMessagePayload,
+  roleId: string | null,
+): DiscordMessagePayload {
+  if (!roleId) return payload;
+  return {
+    ...payload,
+    content: [
+      `<@&${roleId}> **GM signup is now open.**`,
+      payload.content,
+    ].filter((line): line is string => Boolean(line)).join("\n"),
+    allowed_mentions: safeAllowedMentions([roleId]),
+  };
+}
+
 export interface WeekServiceOptions {
   now?: () => number;
   id?: () => string;
@@ -184,8 +199,9 @@ export class WeekService {
       "## Guild Assistant status",
       "**Player signup and tables:** " + (config.eventChannelId ? "<#" + config.eventChannelId + ">" : "missing"),
       "**GM signup channel:** " + (config.gmSignupChannelId ? "<#" + config.gmSignupChannelId + ">" : "same as player signup"),
-      "**Member roles:** admin-managed; the assistant never changes them",
-      "**Reminder role:** " +
+      "**GM signup notification role:** " +
+        (config.gmNotificationRoleId ? "<@&" + config.gmNotificationRoleId + ">" : "not configured"),
+      "**Player reminder role:** " +
         (config.reminderRoleId ? "<@&" + config.reminderRoleId + ">" : "not configured"),
       "**Time zone:** " + config.timezone,
       "**GM signup:** " +
@@ -553,7 +569,7 @@ export class WeekService {
         return;
       }
       const message = await this.discord.sendChannelMessage(playerChannelId, {
-        ...payload,
+        ...gmSignupAnnouncement(payload, config.gmNotificationRoleId),
         nonce: discordNonce("signup:" + event.eventId),
         enforce_nonce: true,
       });
@@ -573,7 +589,7 @@ export class WeekService {
       );
     } else {
       const message = await this.discord.sendChannelMessage(gmChannelId, {
-        ...gmPayload,
+        ...gmSignupAnnouncement(gmPayload, config.gmNotificationRoleId),
         nonce: discordNonce("signup-gm:" + event.eventId),
         enforce_nonce: true,
       });

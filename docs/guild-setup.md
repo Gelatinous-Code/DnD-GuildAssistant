@@ -163,9 +163,21 @@ See the [player and GM guide](player-guide.md#choose-a-table) for the member-fac
 explanation of per-tier reservations, same-tier waitlists, table waitlists, and open
 seating.
 
-## Optional: reminder roles
+## Optional notification roles
 
-To let the bot mention a signup audience:
+### GM signup notification
+
+1. Open the `GM` role in **Server Settings → Roles**.
+2. Enable **Allow anyone to @mention this role**.
+3. Save it with `/guild setup gm_notification_role:@GM`.
+
+When GM signup opens, the bot posts in the configured GM signup channel and
+mentions this role once. The Second Dawn preset selects `@GM` automatically,
+but Discord still requires the mention setting above.
+
+### Player signup reminders
+
+To let the bot mention the player signup audience:
 
 1. Create or choose a normal role, such as `Game Night`.
 2. In that role's Discord settings, enable **Allow anyone to @mention this
@@ -180,11 +192,10 @@ custom message or time, use `/reminder configure`; Discord will show a private
 preview before anything is sent. The bot rejects `@everyone`, `@here`, raw user
 mentions, and roles that were not chosen through the command field.
 
-## Member roles are managed by admins
+## Discord permissions
 
-The Guild Assistant never assigns or removes Discord member roles. Do not grant
-it **Manage Roles**. If the guild wants a temporary `Weekly GM` role, server
-admins assign and remove that role using Discord's normal role tools.
+Do not grant the bot **Manage Roles**; notifications and scheduling do not need
+it. Server admins continue assigning guild roles through Discord.
 
 ## Choose how much the bot automates
 
@@ -220,10 +231,11 @@ self-hosted installation should complete the
 | Symptom | Fix |
 | --- | --- |
 | `/guild` is missing | Ask the deployer to register commands for this exact Discord Server ID, then reload Discord. |
+| `/guild automation` still shows **GM role sync** | The server has an old command definition. Run the protected **Register Discord commands** workflow for the deployed commit, then reload Discord. |
 | The bot appears offline | Use `/ping`; this bot may not show an online presence. |
 | `/ping` does not answer | Ask the deployer to check the Worker, interaction endpoint, and Discord Public Key. |
 | The channel has a ❌ | Grant View Channel, Send Messages, Embed Links, and Read Message History there. |
-| A reminder role has a ❌ | Enable **Allow anyone to @mention this role**. |
+| A notification role has a ❌ | Open that role in Server Settings and enable **Allow anyone to @mention this role**. |
 | Setup asks for Manage Roles | Do not grant it. Update to the latest Guild Assistant release and re-register the Discord commands; member roles are admin-managed. |
 | The schedule is wrong | Change only the incorrect day or time, then reopen `/guild setup`. |
 | Something is happening at the wrong time | Pause automation, run `/guild status`, and check the saved time zone and all five stages. |

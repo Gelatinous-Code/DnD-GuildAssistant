@@ -46,6 +46,7 @@ export interface GuildConfig {
   reminderChannelId: string | null;
   adminRoleId: string | null;
   gmRoleId: string | null;
+  gmNotificationRoleId: string | null;
   reminderRoleId: string | null;
   timezone: string;
   weeklyDay: number;
@@ -86,6 +87,7 @@ export interface GuildConfigPatch {
   reminderChannelId?: string;
   adminRoleId?: string | null;
   gmRoleId?: string | null;
+  gmNotificationRoleId?: string | null;
   reminderRoleId?: string | null;
   timezone?: string;
   weeklyDay?: number;
@@ -430,6 +432,7 @@ type GuildConfigRow = {
   reminder_channel_id: string | null;
   admin_role_id: string | null;
   gm_role_id: string | null;
+  gm_notification_role_id: string | null;
   reminder_role_id: string | null;
   timezone: string;
   weekly_day: number;
@@ -663,6 +666,7 @@ function guildConfigFromRow(row: GuildConfigRow): GuildConfig {
     gmSignupChannelId: row.gm_signup_channel_id,
     adminRoleId: row.admin_role_id,
     gmRoleId: null,
+    gmNotificationRoleId: row.gm_notification_role_id,
     reminderRoleId: row.reminder_role_id,
     timezone: row.timezone,
     weeklyDay: row.weekly_day,
@@ -913,6 +917,7 @@ export class GuildRepository {
              reminder_channel_id = COALESCE(?, reminder_channel_id),
              admin_role_id = CASE WHEN ? = 1 THEN ? ELSE admin_role_id END,
              gm_role_id = CASE WHEN ? = 1 THEN ? ELSE gm_role_id END,
+             gm_notification_role_id = CASE WHEN ? = 1 THEN ? ELSE gm_notification_role_id END,
              reminder_role_id = CASE WHEN ? = 1 THEN ? ELSE reminder_role_id END,
              timezone = COALESCE(?, timezone),
              weekly_day = COALESCE(?, weekly_day),
@@ -947,6 +952,8 @@ export class GuildRepository {
           asNullable(input.adminRoleId),
           1,
           null,
+          Number(input.gmNotificationRoleId !== undefined),
+          asNullable(input.gmNotificationRoleId),
           Number(input.reminderRoleId !== undefined),
           asNullable(input.reminderRoleId),
           asNullable(input.timezone),

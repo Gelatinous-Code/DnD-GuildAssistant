@@ -188,7 +188,7 @@ describe("deferred Discord interactions", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toMatchObject({
       content:
-        "🛡️ Member roles are managed by server admins. This assistant never changes them.",
+        "This command has been retired. Ask a server admin if you need a role change.",
       allowed_mentions: { parse: [] },
     });
   });

@@ -212,6 +212,7 @@ const configRow = {
   reminder_channel_id: "channel-3",
   admin_role_id: "admin-role",
   gm_role_id: "gm-role",
+  gm_notification_role_id: "gm-notification-role",
   reminder_role_id: "reminder-role",
   timezone: "America/Denver",
   weekly_day: 7,
@@ -359,7 +360,7 @@ describe("D1 persistence model", () => {
     expect(fake.statements[1]?.values).toContain("channel-1");
     expect(fake.statements[1]?.values).toContain(7);
     expect(fake.statements[1]?.values.slice(7, 9)).toEqual([1, null]);
-    expect(fake.statements[1]?.values[21]).toBe(0);
+    expect(fake.statements[1]?.values[23]).toBe(0);
   });
 
   it("explicitly clears configured roles without treating omitted roles as null", async () => {
@@ -369,6 +370,7 @@ describe("D1 persistence model", () => {
       ...configRow,
       admin_role_id: null,
       gm_role_id: null,
+      gm_notification_role_id: null,
       reminder_role_id: null,
     });
     const repository = new GuildRepository(fake as unknown as D1Database, () => 200);
@@ -377,17 +379,19 @@ describe("D1 persistence model", () => {
       guildId: "guild-1",
       adminRoleId: null,
       gmRoleId: null,
+      gmNotificationRoleId: null,
       reminderRoleId: null,
     });
 
     expect(saved.adminRoleId).toBeNull();
     expect(saved.gmRoleId).toBeNull();
+    expect(saved.gmNotificationRoleId).toBeNull();
     expect(saved.reminderRoleId).toBeNull();
     expect(fake.statements[1]?.sql).toContain(
       "admin_role_id = CASE WHEN ? = 1 THEN ? ELSE admin_role_id END",
     );
-    expect(fake.statements[1]?.values.slice(5, 11)).toEqual([
-      1, null, 1, null, 1, null,
+    expect(fake.statements[1]?.values.slice(5, 13)).toEqual([
+      1, null, 1, null, 1, null, 1, null,
     ]);
   });
 
