@@ -1,4 +1,4 @@
-# Website session-summary read model
+# Website member-safe read models
 
 The guild website can read submitted session notes from the Worker without
 making the Google Sheet a second source of truth. The API exposes only current,
@@ -45,6 +45,16 @@ revisions.
 
 Responses are `private, no-store`, include an ETag, and vary by Authorization.
 The Worker reauthorizes the visitor before returning `304 Not Modified`.
+
+Additional member-safe contracts use the same authorization, rate limit, private caching, and ETag rules:
+
+| Route | Contract | Notes |
+| --- | --- | --- |
+| `/api/v1/guilds/{guild_id}/player-journals` | `player-journals.v1` | Visible submitted journals; omits author Discord IDs. |
+| `/api/v1/guilds/{guild_id}/historical-summaries` | `historical-summaries.v1` | Published immutable imports only. |
+| `/api/v1/guilds/{guild_id}/progression-seasons` | `progression-seasons.v1` | `season=current`, `season=all`, or an exact season ID; omits owner Discord IDs. |
+
+The journal and historical-summary routes accept `limit` from 1–50. Detailed operational behavior is in [player character journals](player-journals.md), [historical summary import](historical-session-import.md), and [progression seasons](progression-seasons.md).
 
 ## Errors and limits
 

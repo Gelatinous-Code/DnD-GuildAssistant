@@ -15,6 +15,7 @@ import type {
 export type ProgressionServiceRepository = Pick<
   ProgressionRepository,
   | "getBalance"
+  | "getBalanceForSeason"
   | "listBalancesForOwner"
   | "listHistory"
   | "getTarget"
@@ -93,6 +94,14 @@ export class ProgressionService {
     return this.progression.getBalance(guildId, characterId);
   }
 
+  getBalanceForSeason(
+    guildId: string,
+    characterId: string,
+    seasonId: string,
+  ): Promise<CharacterProgressionBalance | null> {
+    return this.progression.getBalanceForSeason(guildId, characterId, seasonId);
+  }
+
   listBalancesForOwner(
     guildId: string,
     ownerUserId: string,
@@ -149,6 +158,7 @@ export class ProgressionService {
     characterId: string;
     xpDelta: number;
     goldDelta: number;
+    seasonId?: string | null;
     actorUserId: string;
     reason: string;
     operationKey: string;
@@ -159,7 +169,9 @@ export class ProgressionService {
     if (input.xpDelta === 0 && input.goldDelta === 0) {
       throw new RangeError("At least one adjustment must be non-zero");
     }
-    const balance = await this.progression.getBalance(input.guildId, input.characterId);
+    const balance = input.seasonId
+      ? await this.progression.getBalanceForSeason(input.guildId, input.characterId, input.seasonId)
+      : await this.progression.getBalance(input.guildId, input.characterId);
     if (!balance) throw new CharacterRuleError("Character not found in this guild.");
     if (balance.xp + input.xpDelta < 0 || balance.gold + input.goldDelta < 0) {
       throw new CharacterRuleError("An adjustment cannot make XP or gold negative.");
@@ -171,6 +183,7 @@ export class ProgressionService {
       entryKind: "admin_adjustment",
       xpDelta: input.xpDelta,
       goldDelta: input.goldDelta,
+      seasonId: input.seasonId ?? null,
       actorUserId: input.actorUserId,
       reason: cleanReason(input.reason),
       idempotencyKey: input.operationKey,

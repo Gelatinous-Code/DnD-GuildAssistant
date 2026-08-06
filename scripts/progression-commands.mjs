@@ -52,8 +52,29 @@ export const progressionCommands = [
           characterId,
           { type: 4, name: "xp_delta", description: "Signed XP change; omit for zero.", min_value: -1000000, max_value: 1000000 },
           { type: 4, name: "gold_delta", description: "Signed gold change; omit for zero.", min_value: -100000000, max_value: 100000000 },
+          { type: 3, name: "season_id", description: "Optional historical season to correct.", min_length: 1, max_length: 80 },
           { type: 3, name: "reason", description: "Required audit reason.", required: true, min_length: 3, max_length: 500 },
           { type: 5, name: "confirm", description: "Required: append this immutable adjustment.", required: true },
+        ],
+      },
+      {
+        type: 1,
+        name: "season-preview",
+        description: "Preview an XP/gold reset into a new progression season.",
+        options: [
+          { type: 3, name: "season_id", description: "Stable season ID.", required: true, min_length: 1, max_length: 80 },
+          { type: 3, name: "name", description: "Player-facing season name.", required: true, min_length: 1, max_length: 80 },
+        ],
+      },
+      {
+        type: 1,
+        name: "season-rollover",
+        description: "Close the current season and reset continuing characters to zero.",
+        options: [
+          { type: 3, name: "season_id", description: "Stable season ID.", required: true, min_length: 1, max_length: 80 },
+          { type: 3, name: "name", description: "Player-facing season name.", required: true, min_length: 1, max_length: 80 },
+          { type: 3, name: "reason", description: "Required audit reason.", required: true, min_length: 3, max_length: 500 },
+          { type: 5, name: "confirm", description: "Required: perform this season rollover.", required: true },
         ],
       },
       {

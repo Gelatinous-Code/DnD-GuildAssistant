@@ -12,6 +12,7 @@ export interface ProgressionLedgerEntry {
   entryId: string;
   guildId: string;
   characterId: string;
+  seasonId: string;
   entryKind: ProgressionEntryKind;
   xpDelta: number;
   goldDelta: number;
@@ -55,6 +56,7 @@ type EntryRow = {
   entry_id: string;
   guild_id: string;
   character_id: string;
+  season_id: string;
   entry_kind: ProgressionEntryKind;
   xp_delta: number;
   gold_delta: number;
@@ -101,6 +103,7 @@ function entryFromRow(row: EntryRow): ProgressionLedgerEntry {
     entryId: row.entry_id,
     guildId: row.guild_id,
     characterId: row.character_id,
+    seasonId: row.season_id,
     entryKind: row.entry_kind,
     xpDelta: row.xp_delta,
     goldDelta: row.gold_delta,
@@ -146,6 +149,7 @@ export interface AppendProgressionEntryInput {
   entryId: string;
   guildId: string;
   characterId: string;
+  seasonId?: string | null;
   entryKind: ProgressionEntryKind;
   xpDelta: number;
   goldDelta: number;
@@ -179,6 +183,19 @@ export class ProgressionRepository {
       )
       .bind(guildId, characterId)
       .first<BalanceRow>();
+    return row ? balanceFromRow(row) : null;
+  }
+
+  async getBalanceForSeason(
+    guildId: string,
+    characterId: string,
+    seasonId: string,
+  ): Promise<CharacterProgressionBalance | null> {
+    const row = await this.db.prepare(
+      `SELECT guild_id, character_id, owner_user_id, xp, gold
+       FROM character_progression_by_season
+       WHERE guild_id = ? AND character_id = ? AND season_id = ?`,
+    ).bind(guildId, characterId, seasonId).first<BalanceRow>();
     return row ? balanceFromRow(row) : null;
   }
 
@@ -323,13 +340,13 @@ export class ProgressionRepository {
     await this.db
       .prepare(
         `INSERT OR IGNORE INTO progression_ledger_entries (
-          entry_id, guild_id, character_id, entry_kind, xp_delta, gold_delta,
+          entry_id, guild_id, character_id, season_id, entry_kind, xp_delta, gold_delta,
           source_session_id, source_completion_revision_id, source_user_id,
           participant_role, policy_version, pre_award_xp, pre_award_gold,
           pre_award_level, reverses_entry_id, actor_user_id, reason,
           idempotency_key, occurred_at
         )
-        SELECT ?, balance.guild_id, balance.character_id, 'session_award', ?,
+        SELECT ?, balance.guild_id, balance.character_id, balance.season_id, 'session_award', ?,
           CASE
             WHEN balance.xp >= 42 THEN 1000 WHEN balance.xp >= 33 THEN 800
             WHEN balance.xp >= 25 THEN 600 WHEN balance.xp >= 18 THEN 400
@@ -385,17 +402,20 @@ export class ProgressionRepository {
     await this.db
       .prepare(
         `INSERT OR IGNORE INTO progression_ledger_entries (
-           entry_id, guild_id, character_id, entry_kind, xp_delta, gold_delta,
+           entry_id, guild_id, character_id, season_id, entry_kind, xp_delta, gold_delta,
            source_session_id, source_completion_revision_id, source_user_id,
            participant_role, policy_version, pre_award_xp, pre_award_gold,
            pre_award_level, reverses_entry_id, actor_user_id, reason,
            idempotency_key, occurred_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, COALESCE(?, (SELECT season_id FROM progression_seasons
+           WHERE guild_id = ? AND status = 'current')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         input.entryId,
         input.guildId,
         input.characterId,
+        input.seasonId ?? null,
+        input.guildId,
         input.entryKind,
         input.xpDelta,
         input.goldDelta,
@@ -423,6 +443,7 @@ export class ProgressionRepository {
     if (
       entry.characterId !== input.characterId ||
       entry.entryKind !== input.entryKind ||
+      (input.seasonId !== null && input.seasonId !== undefined && entry.seasonId !== input.seasonId) ||
       entry.xpDelta !== input.xpDelta ||
       entry.goldDelta !== input.goldDelta ||
       entry.reversesEntryId !== (input.reversesEntryId ?? null)

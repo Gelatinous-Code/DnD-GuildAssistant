@@ -13,6 +13,10 @@ import {
   UserFacingError,
 } from "./interaction-utils";
 import { ProgressionService } from "./progression-service";
+import {
+  ProgressionSeasonRuleError,
+  ProgressionSeasonService,
+} from "./progression-season-service";
 import { CharacterRepository } from "./storage/character-repository";
 import { ProgressionRepository } from "./storage/progression-repository";
 import { SessionRepository } from "./storage/session-repository";
@@ -35,6 +39,7 @@ function services(env: Env) {
       new ProgressionRepository(env.DB),
       characterRepository,
     ),
+    seasons: new ProgressionSeasonService(env.DB),
     sessions: new SessionRepository(env.DB),
   };
 }
@@ -115,7 +120,7 @@ export async function handleProgressionCommand(
     const guildId = requireGuild(interaction);
     const actorUserId = invokingUserId(interaction);
     if (!actorUserId) throw new UserFacingError("Discord did not identify the member.");
-    const { characters, progression } = services(env);
+    const { characters, progression, seasons } = services(env);
 
     if (invocation.command === "progression-admin") {
       if (!isGuildAdmin(interaction)) {
@@ -125,20 +130,57 @@ export async function handleProgressionCommand(
         if (booleanOption(invocation, "confirm") !== true) {
           throw new UserFacingError("Set confirm to True to append this adjustment.");
         }
+        const seasonId = stringOption(invocation, "season_id")?.trim() || null;
         const entry = await progression.adjust({
           guildId,
           characterId: requireText(stringOption(invocation, "character_id"), "Character ID"),
           xpDelta: numberOption(invocation, "xp_delta") ?? 0,
           goldDelta: numberOption(invocation, "gold_delta") ?? 0,
+          seasonId,
           actorUserId,
           reason: requireText(stringOption(invocation, "reason"), "Reason"),
           operationKey: `progression:adjust:${interaction.id ?? crypto.randomUUID()}`,
         });
-        const balance = await progression.getBalance(guildId, entry.characterId);
+        const balance = seasonId
+          ? await progression.getBalanceForSeason(guildId, entry.characterId, seasonId)
+          : await progression.getBalance(guildId, entry.characterId);
         return ephemeral(
           `✅ Adjustment appended: XP ${entry.xpDelta >= 0 ? "+" : ""}${entry.xpDelta}, ` +
           `gold ${entry.goldDelta >= 0 ? "+" : ""}${entry.goldDelta}. ` +
           `New balance: ${balance?.xp} XP, ${balance?.gold} gold.`,
+        );
+      }
+      if (invocation.subcommand === "season-preview") {
+        const preview = await seasons.previewRollover({
+          guildId,
+          nextSeasonId: requireText(stringOption(invocation, "season_id"), "Season ID"),
+          nextSeasonName: requireText(stringOption(invocation, "name"), "Season name"),
+        });
+        return ephemeral(
+          `**Season rollover preview**\n` +
+          `Current: **${preview.currentSeason.name}** (\`${preview.currentSeason.seasonId}\`)\n` +
+          `Next: **${preview.nextSeasonName}** (\`${preview.nextSeasonId}\`)\n` +
+          `${preview.continuingCharacterCount} continuing characters will start at 0 XP / 0 gold.\n` +
+          `${preview.nonzeroBalanceCount} currently hold ${preview.totalXp} XP and ` +
+          `${preview.totalGold} gold; those balances remain in immutable history.`,
+        );
+      }
+      if (invocation.subcommand === "season-rollover") {
+        if (booleanOption(invocation, "confirm") !== true) {
+          throw new UserFacingError("Set confirm to True to perform the season rollover.");
+        }
+        const result = await seasons.rollover({
+          guildId,
+          nextSeasonId: requireText(stringOption(invocation, "season_id"), "Season ID"),
+          nextSeasonName: requireText(stringOption(invocation, "name"), "Season name"),
+          actorUserId,
+          reason: requireText(stringOption(invocation, "reason"), "Reason"),
+          operationKey: `progression:season-rollover:${interaction.id ?? crypto.randomUUID()}`,
+        });
+        return ephemeral(
+          `${result.replayed ? "↩️ Rollover already completed" : "✅ Season rollover completed"}: ` +
+          `**${result.season.name}** is current. ` +
+          `${result.continuingCharacterCount} continuing characters start at 0 XP / 0 gold.`,
         );
       }
       if (invocation.subcommand === "history") {
@@ -212,7 +254,12 @@ export async function handleProgressionCommand(
     }
     throw new UserFacingError("Choose a progression action.");
   } catch (error) {
-    if (error instanceof CharacterRuleError || error instanceof TypeError || error instanceof RangeError) {
+    if (
+      error instanceof CharacterRuleError ||
+      error instanceof ProgressionSeasonRuleError ||
+      error instanceof TypeError ||
+      error instanceof RangeError
+    ) {
       throw new UserFacingError(error.message);
     }
     throw error;
