@@ -8,11 +8,16 @@ import {
 import {
   ButtonStyle,
   ComponentType,
+  DiscordApiError,
   DiscordRestClient,
   discordTimestamp,
   safeAllowedMentions,
 } from "./discord-api";
 import type { SessionService } from "./session-service";
+import type {
+  RecapControlContext,
+  SessionRecapOperationsRepository,
+} from "./storage/session-recap-operations-repository";
 import type {
   SessionSummary,
   SessionSummaryDelivery,
@@ -27,6 +32,8 @@ export interface SessionSummaryServiceOptions {
   now?: () => number;
   id?: () => string;
   recapsEnabled?: boolean;
+  rewardPolicyVersion?: string | null;
+  operations?: Pick<SessionRecapOperationsRepository, "getBySummaryId">;
 }
 
 function defaultId(): string {
@@ -34,6 +41,10 @@ function defaultId(): string {
 }
 
 function errorKind(error: unknown): string {
+  if (error instanceof DiscordApiError && (error.code === 50_007 || error.status === 403)) {
+    return "discord_dm_blocked";
+  }
+  if (error instanceof DiscordApiError) return `discord_api_${error.status || "network"}`;
   return error instanceof Error ? error.name.slice(0, 200) : typeof error;
 }
 
@@ -47,6 +58,13 @@ export function summaryOpenCustomId(summaryId: string): string {
   return customId;
 }
 
+export function summaryDidNotRunCustomId(summaryId: string, confirm = false): string {
+  const action = confirm ? "not_run_confirm" : "not_run";
+  const customId = `guild:summary:${action}:${summaryId}`;
+  if (customId.length > 100) throw new RangeError("Summary button ID exceeds Discord's limit");
+  return customId;
+}
+
 export function summarySubmitCustomId(summaryId: string): string {
   const customId = `guild:summary:submit:${summaryId}`;
   if (customId.length > 100) throw new RangeError("Summary modal ID exceeds Discord's limit");
@@ -55,9 +73,27 @@ export function summarySubmitCustomId(summaryId: string): string {
 
 export function parseSummaryCustomId(
   customId: string | undefined,
-): { action: "open" | "submit"; summaryId: string } | null {
-  const match = /^guild:summary:(open|submit):([^:]{1,72})$/.exec(customId ?? "");
-  return match ? { action: match[1] as "open" | "submit", summaryId: match[2]! } : null;
+): { action: "open" | "submit" | "not_run" | "not_run_confirm"; summaryId: string } | null {
+  const match = /^guild:summary:(open|submit|not_run|not_run_confirm):([^:]{1,72})$/.exec(
+    customId ?? "",
+  );
+  if (!match?.[2]) return null;
+  const summaryId = match[2];
+  switch (match[1]) {
+    case "open":
+    case "submit":
+    case "not_run":
+    case "not_run_confirm":
+      return { action: match[1], summaryId };
+    default:
+      return null;
+  }
+}
+
+function renderSessionContext(context: RecapControlContext | null | undefined): string {
+  if (!context) return "your guild session";
+  const tier = context.gameTier ? `Tier ${context.gameTier}` : "tier not recorded";
+  return `**${context.eventTitle}** — Table ${context.tableNumber}: **${context.tableTitle}** (${tier}), which ended ${discordTimestamp(context.endsAt)}`;
 }
 
 export class SummaryAccessError extends Error {
@@ -71,6 +107,8 @@ export class SessionSummaryService {
   private readonly now: () => number;
   private readonly id: () => string;
   private readonly recapsEnabled: boolean;
+  private readonly rewardPolicyVersion: string | null;
+  private readonly operations?: Pick<SessionRecapOperationsRepository, "getBySummaryId">;
 
   constructor(
     private readonly repository: SessionSummaryRepository,
@@ -80,7 +118,12 @@ export class SessionSummaryService {
   ) {
     this.now = options.now ?? Date.now;
     this.id = options.id ?? defaultId;
-    this.recapsEnabled = options.recapsEnabled ?? false;
+    const rewardPolicyVersion = options.rewardPolicyVersion?.trim() ?? "";
+    this.rewardPolicyVersion = rewardPolicyVersion.length >= 1 && rewardPolicyVersion.length <= 100
+      ? rewardPolicyVersion
+      : null;
+    this.recapsEnabled = options.recapsEnabled === true && this.rewardPolicyVersion !== null;
+    this.operations = options.operations;
   }
 
   async runScheduled(limit = 50): Promise<void> {
@@ -107,7 +150,8 @@ export class SessionSummaryService {
       }
     }
 
-    if (!this.recapsEnabled) return;
+    const rewardPolicyVersion = this.rewardPolicyVersion;
+    if (!this.recapsEnabled || !rewardPolicyVersion) return;
 
     const creationTargets = await this.repository.listSummaryCreationDue(limit);
     for (const target of creationTargets) {
@@ -126,11 +170,16 @@ export class SessionSummaryService {
           schedule.reminderAt,
           now + SUMMARY_MIN_REMINDER_AFTER_PROMPT_MS,
         ),
+        rewardPolicyVersion,
         createdAt: now,
       });
     }
 
-    const deliveries = await this.repository.listDueDeliveries(now, limit);
+    await this.deliverDue(limit);
+  }
+
+  async deliverDue(limit = 50): Promise<void> {
+    const deliveries = await this.repository.listDueDeliveries(this.now(), limit);
     for (const delivery of deliveries) {
       await this.deliver(delivery);
     }
@@ -141,6 +190,9 @@ export class SessionSummaryService {
     if (!summary) throw new SummaryAccessError("That session summary no longer exists.");
     if (summary.dmUserId !== userId) {
       throw new SummaryAccessError("Only the DM recorded for this session may edit its summary.");
+    }
+    if (summary.authorEditStatus === "locked") {
+      throw new SummaryAccessError("An admin has locked editing for this session summary.");
     }
     if (
       summary.status === "submitted" &&
@@ -193,20 +245,30 @@ export class SessionSummaryService {
     const now = this.now();
     try {
       const reminder = delivery.deliveryKind === "reminder";
+      const context = await this.operations?.getBySummaryId(summary.summaryId);
+      const sessionContext = renderSessionContext(context);
       const message = await this.discord.sendDirectMessage(
         delivery.recipientUserId,
         {
           content: reminder
-            ? `⏰ Your session summary is still waiting. The on-time deadline is ${discordTimestamp(summary.dueAt)}. You can edit for seven days after your first submission.`
-            : `Thanks for running a guild session! Please submit the public session notes by ${discordTimestamp(summary.dueAt)}. Include the summary, area, important events, bonus gold or items, and anything else players should know.`,
+            ? `⏰ You are the recorded DM for ${sessionContext}, and its session summary is still waiting. The on-time deadline is ${discordTimestamp(summary.dueAt)}. You can edit for seven days after your first submission.`
+            : `You are the recorded DM for ${sessionContext}. Thanks for running it! Please submit the public session notes by ${discordTimestamp(summary.dueAt)}. Include the summary, area, important events, bonus gold or items, and anything else players should know.`,
           components: [{
             type: ComponentType.ActionRow,
-            components: [{
-              type: ComponentType.Button,
-              style: ButtonStyle.Primary,
-              custom_id: summaryOpenCustomId(summary.summaryId),
-              label: "Write session summary",
-            }],
+            components: [
+              {
+                type: ComponentType.Button,
+                style: ButtonStyle.Primary,
+                custom_id: summaryOpenCustomId(summary.summaryId),
+                label: "Write session summary",
+              },
+              {
+                type: ComponentType.Button,
+                style: ButtonStyle.Danger,
+                custom_id: summaryDidNotRunCustomId(summary.summaryId),
+                label: "Session did not run",
+              },
+            ],
           }],
           allowed_mentions: safeAllowedMentions(),
         },

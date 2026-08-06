@@ -39,7 +39,7 @@ Optional query parameters:
 - `area`: case-insensitive substring, at most 100 characters
 
 The response contains event and table labels, dates, tier, area, summary,
-important events, bonus gold/items, other notes, and revision metadata. It does
+important events, bonus gold/items, other notes, append-only administrator correction notes, and revision metadata. It does
 not expose OAuth tokens, delivery state, internal audit rows, or hidden/stale
 revisions.
 

@@ -41,6 +41,7 @@ describe("session summary interaction routing", () => {
       DISCORD_APPLICATION_ID: "1533171671886725293",
       DISCORD_TEST_GUILD_ID: "1533181439376494642",
   SESSION_RECAP_WORKFLOW_ENABLED: "false",
+  SESSION_RECAP_REWARD_POLICY_VERSION: "",
     } satisfies Env;
     let deferred = false;
     const context = {

@@ -1,7 +1,10 @@
 import { handleCharacterCommand } from "./character-app";
 import { handleProgressionCommand } from "./progression-app";
 import { handleTableThreadCommand } from "./table-thread-app";
-import { handleSessionSummaryInteraction } from "./session-summary-app";
+import {
+  handleSessionSummaryCommand,
+  handleSessionSummaryInteraction,
+} from "./session-summary-app";
 import { parseSummaryCustomId } from "./session-summary-service";
 import {
   DiscordRestClient,
@@ -1439,6 +1442,8 @@ async function executeDiscordInteraction(
     if (progressionResponse !== null) return progressionResponse;
     const tableThreadResponse = await handleTableThreadCommand(interaction, env);
     if (tableThreadResponse !== null) return tableThreadResponse;
+    const summaryResponse = await handleSessionSummaryCommand(interaction, env);
+    if (summaryResponse !== null) return summaryResponse;
     const m6Response = await handleM6Command(interaction, env);
     if (m6Response !== null) return m6Response;
     return ephemeral("I don't recognize that command yet.");

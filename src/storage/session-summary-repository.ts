@@ -30,6 +30,11 @@ export interface SessionSummary extends SessionSummaryFields {
   hiddenAt: number | null;
   hiddenByUserId: string | null;
   hiddenReason: string | null;
+  rewardPolicyVersion: string | null;
+  authorEditStatus: "open" | "locked";
+  editLockedAt: number | null;
+  editLockedByUserId: string | null;
+  editLockReason: string | null;
   version: number;
   createdAt: number;
   updatedAt: number;
@@ -88,6 +93,11 @@ type SummaryRow = {
   hidden_at: number | null;
   hidden_by_user_id: string | null;
   hidden_reason: string | null;
+  reward_policy_version: string | null;
+  author_edit_status: "open" | "locked";
+  edit_locked_at: number | null;
+  edit_locked_by_user_id: string | null;
+  edit_lock_reason: string | null;
   version: number;
   created_at: number;
   updated_at: number;
@@ -133,6 +143,11 @@ function summaryFromRow(row: SummaryRow): SessionSummary {
     hiddenAt: row.hidden_at,
     hiddenByUserId: row.hidden_by_user_id,
     hiddenReason: row.hidden_reason,
+    rewardPolicyVersion: row.reward_policy_version,
+    authorEditStatus: row.author_edit_status,
+    editLockedAt: row.edit_locked_at,
+    editLockedByUserId: row.edit_locked_by_user_id,
+    editLockReason: row.edit_lock_reason,
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -174,6 +189,13 @@ export class SessionSummaryRepository {
           AND session.source_table_id = table_row.table_id
          WHERE event.status = 'archived' AND event.ends_at IS NOT NULL
            AND event.ends_at <= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM table_thread_workflows workflow
+             WHERE workflow.guild_id = event.guild_id
+               AND workflow.event_id = event.event_id
+               AND workflow.table_id = table_row.table_id
+               AND workflow.status = 'cancelled'
+           )
            AND (session.session_id IS NULL OR session.draft_open = 1)
            AND NOT EXISTS (
              SELECT 1 FROM session_completion_revisions revision
@@ -255,14 +277,15 @@ export class SessionSummaryRepository {
     sessionEndsAt: number;
     dueAt: number;
     reminderAt: number;
+    rewardPolicyVersion: string;
     createdAt: number;
   }): Promise<SessionSummary> {
     await this.db
       .prepare(
         `INSERT OR IGNORE INTO session_summaries (
            summary_id, guild_id, session_id, completion_revision_id, dm_user_id,
-           session_ends_at, due_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           session_ends_at, due_at, reward_policy_version, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         input.summaryId,
@@ -272,6 +295,7 @@ export class SessionSummaryRepository {
         input.dmUserId,
         input.sessionEndsAt,
         input.dueAt,
+        input.rewardPolicyVersion,
         input.createdAt,
         input.createdAt,
       )
@@ -443,7 +467,7 @@ export class SessionSummaryRepository {
         )
         .bind(input.submittedAt, input.summaryId, input.guildId),
     ]);
-    if (results[0]?.meta.changes !== 1) return null;
+    if (!results[0] || results[0].meta.changes < 1) return null;
     return this.get(input.guildId, input.summaryId);
   }
 

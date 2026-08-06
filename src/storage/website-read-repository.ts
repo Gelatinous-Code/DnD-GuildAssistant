@@ -22,6 +22,7 @@ export interface WebsiteSummaryItem {
   importantEvents: string | null;
   bonusRewards: string | null;
   otherNotes: string | null;
+  corrections: Array<{ text: string; correctedAt: number }>;
   firstSubmittedAt: number;
   lastSubmittedAt: number;
   revision: number;
@@ -42,12 +43,27 @@ type WebsiteSummaryRow = {
   important_events: string | null;
   bonus_rewards: string | null;
   other_notes: string | null;
+  corrections_json: string;
   first_submitted_at: number;
   last_submitted_at: number;
   version: number;
 };
 
+function correctionsFromJson(value: string): Array<{ text: string; correctedAt: number }> {
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((item: unknown) => {
+    if (!item || typeof item !== "object") return [];
+    const text = Reflect.get(item, "text");
+    const correctedAt = Reflect.get(item, "correctedAt");
+    return typeof text === "string" && Number.isSafeInteger(correctedAt)
+      ? [{ text, correctedAt: Number(correctedAt) }]
+      : [];
+  });
+}
+
 function itemFromRow(row: WebsiteSummaryRow): WebsiteSummaryItem {
+  const corrections = correctionsFromJson(row.corrections_json);
   return {
     summaryId: row.summary_id,
     sessionId: row.session_id,
@@ -63,6 +79,7 @@ function itemFromRow(row: WebsiteSummaryRow): WebsiteSummaryItem {
     importantEvents: row.important_events,
     bonusRewards: row.bonus_rewards,
     otherNotes: row.other_notes,
+    corrections,
     firstSubmittedAt: row.first_submitted_at,
     lastSubmittedAt: row.last_submitted_at,
     revision: row.version - 1,
@@ -129,8 +146,22 @@ export class WebsiteReadRepository {
                 table_row.table_number, table_row.title AS table_title,
                 table_row.game_tier, summary.area, summary.summary_text,
                 summary.important_events, summary.bonus_rewards,
-                summary.other_notes, summary.first_submitted_at,
-                summary.last_submitted_at, summary.version
+                summary.other_notes,
+                COALESCE((
+                  SELECT json_group_array(json_object(
+                    'text', correction.public_correction,
+                    'correctedAt', correction.created_at
+                  ))
+                  FROM (
+                    SELECT public_correction, created_at
+                    FROM session_summary_admin_events
+                    WHERE summary_id = summary.summary_id
+                      AND guild_id = summary.guild_id
+                      AND event_kind = 'correction_appended'
+                    ORDER BY created_at, summary_event_id
+                  ) correction
+                ), '[]') AS corrections_json,
+                summary.first_submitted_at, summary.last_submitted_at, summary.version
          FROM session_summaries summary
          JOIN session_completions session
            ON session.session_id = summary.session_id AND session.guild_id = summary.guild_id

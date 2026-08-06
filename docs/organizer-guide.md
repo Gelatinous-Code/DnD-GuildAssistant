@@ -58,7 +58,7 @@ Finalized tables are completed automatically after the archived event ends. For 
 2. Record differences from the published roster with `/session attendance`—for example a no-show, substitute, or walk-in.
 3. Run `/session confirm` and choose **Completed** or **Cancelled**. A later confirmation appends a correction instead of rewriting history.
 
-An automatically or manually completed eligible DM session awards exactly two priority tokens, 2 XP, and level-based gold. Players who attended receive 1 XP and level-based gold. After administrators approve an incentive and enable recaps, the actual DM receives a private session-summary form; see [session summaries](session-summaries.md). Use the
+An automatically or manually completed eligible DM session awards exactly two priority tokens, 2 XP, and level-based gold. Players who attended receive 1 XP and level-based gold. After administrators approve an incentive and configure its version, the actual DM receives a private session-summary form; see [session summaries](session-summaries.md). Use `/recap-admin status` and the confirmed `/recap-admin manage` controls for delivery repair, edit locks, visibility, and public corrections. Use the
 [DM priority operations runbook](dm-priority-operations.md) for corrections,
 blocked DMs, disputes, or exceptional refunds.
 

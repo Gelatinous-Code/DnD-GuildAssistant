@@ -169,7 +169,14 @@ export async function handleWebsiteReadRequest(
     const payload = {
       schemaVersion: WEBSITE_SUMMARY_CONTRACT_VERSION,
       guildId,
-      generatedAt: page.items.reduce((latest, item) => Math.max(latest, item.lastSubmittedAt), 0),
+      generatedAt: page.items.reduce(
+        (latest, item) => Math.max(
+          latest,
+          item.lastSubmittedAt,
+          ...item.corrections.map((correction) => correction.correctedAt),
+        ),
+        0,
+      ),
       items: page.items,
       nextCursor: encodeCursor(page.nextCursor),
     };

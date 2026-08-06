@@ -4,9 +4,11 @@ import type { DiscordMessage, DiscordMessagePayload } from "../../src/discord-ap
 import { SUMMARY_EDIT_WINDOW_MS, SUMMARY_REMINDER_AFTER_MS } from "../../src/domain/session-summary";
 import { PriorityService } from "../../src/priority-service";
 import { SessionService } from "../../src/session-service";
+import { SessionRecapOperationsService } from "../../src/session-recap-operations-service";
 import { SessionSummaryService, SummaryAccessError } from "../../src/session-summary-service";
 import { PriorityRepository } from "../../src/storage/priority-repository";
 import { SessionRepository } from "../../src/storage/session-repository";
+import { SessionRecapOperationsRepository } from "../../src/storage/session-recap-operations-repository";
 import { SessionSummaryRepository } from "../../src/storage/session-summary-repository";
 import { handleWebsiteReadRequest } from "../../src/website-read-model";
 
@@ -73,6 +75,18 @@ describe("D1 session summary workflow", () => {
            display_name, status, assigned_at, updated_at
          ) VALUES (?, ?, ?, ?, ?, 'Player', 'assigned', ?, ?)`,
       ).bind(`${prefix}:assignment`, planId, tableId, tableId, playerUserId, startsAt, startsAt),
+      env.DB.prepare(
+        `INSERT INTO table_thread_workflows (
+           workflow_id, guild_id, event_id, table_number, plan_id, table_id,
+           parent_channel_id, thread_name, gm_user_id, gm_display_name, status,
+           cancelled_at, cancelled_by_user_id, cancellation_reason, created_at, updated_at
+         ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'cancelled', ?, ?, ?, ?, ?)`,
+      ).bind(
+        `${prefix}:workflow`, guildId, eventId, planId, tableId,
+        "100000000000000001", "Summary Table", dmUserId, "Summary DM",
+        endsAt - 10_000, `${prefix}:admin`, "Table was manually closed",
+        startsAt, endsAt - 10_000,
+      ),
     ]);
 
     let now = INITIAL_NOW;
@@ -102,11 +116,29 @@ describe("D1 session summary workflow", () => {
       id: ids,
     });
     const repository = new SessionSummaryRepository(env.DB);
+    const operationsRepository = new SessionRecapOperationsRepository(env.DB);
+    const operations = new SessionRecapOperationsService(operationsRepository, sessions, {
+      now: () => now,
+      id: ids,
+    });
     const summaries = new SessionSummaryService(repository, sessions, discord, {
       now: () => now,
       id: ids,
       recapsEnabled: true,
+      rewardPolicyVersion: "test-recap-reward-v1",
+      operations: operationsRepository,
     });
+
+    await summaries.runScheduled();
+    expect(await env.DB.prepare(
+      "SELECT count(*) AS count FROM session_completion_revisions WHERE guild_id = ?",
+    ).bind(guildId).first<number>("count")).toBe(0);
+    expect(sent).toHaveLength(0);
+    await env.DB.prepare(
+      `UPDATE table_thread_workflows SET status = 'pending',
+         cancelled_at = NULL, cancelled_by_user_id = NULL, cancellation_reason = NULL
+       WHERE guild_id = ? AND event_id = ? AND table_id = ?`,
+    ).bind(guildId, eventId, tableId).run();
 
     await summaries.runScheduled();
     const created = await env.DB.prepare(
@@ -119,6 +151,10 @@ describe("D1 session summary workflow", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ userId: dmUserId });
     expect(sent[0]!.content).toContain("bonus gold or items");
+    expect(sent[0]!.content).toContain("Summary acceptance");
+    expect(sent[0]!.content).toContain("Table 1");
+    expect(sent[0]!.content).toContain("Tier 2");
+    expect(sent[0]!.content).toContain("recorded DM");
 
     await summaries.runScheduled();
     expect(sent).toHaveLength(1);
@@ -146,6 +182,12 @@ describe("D1 session summary workflow", () => {
     expect(first.onTime).toBe(true);
     expect(first.summary.version).toBe(2);
     expect(first.summary.editExpiresAt).toBe(now + SUMMARY_EDIT_WINDOW_MS);
+    expect(await operationsRepository.getQualification(summaryId)).toMatchObject({
+      qualification: "timely",
+      timingPolicyVersion: "recap-timing-v1",
+      rewardPolicyVersion: "test-recap-reward-v1",
+      rewardStatus: "qualified_ungranted",
+    });
     let membershipChecks = 0;
     const readSummaryFeed = (etag?: string) => handleWebsiteReadRequest(
       new Request(
@@ -196,6 +238,27 @@ describe("D1 session summary workflow", () => {
     await summaries.runScheduled();
     expect(sent).toHaveLength(2);
 
+    await operations.manage({
+      guildId,
+      eventId,
+      tableNumber: 1,
+      action: "lock",
+      actorUserId: `${prefix}:admin`,
+      reason: "Temporarily lock edits for moderation",
+      idempotencyKey: `${prefix}:lock`,
+    });
+    await expect(summaries.getForDm(summaryId, dmUserId)).rejects.toThrow("locked");
+    await operations.manage({
+      guildId,
+      eventId,
+      tableNumber: 1,
+      action: "reopen",
+      actorUserId: `${prefix}:admin`,
+      reason: "DM may resume editing",
+      idempotencyKey: `${prefix}:reopen`,
+      reopenHours: 48,
+    });
+
     now += 24 * 60 * 60 * 1_000;
     const edited = await summaries.submit({
       summaryId,
@@ -215,6 +278,50 @@ describe("D1 session summary workflow", () => {
     expect(revisions.results).toEqual([
       { revision_number: 1, is_current: 0 },
       { revision_number: 2, is_current: 1 },
+    ]);
+    expect(await env.DB.prepare(
+      "SELECT count(*) AS count FROM session_summary_qualifications WHERE summary_id = ?",
+    ).bind(summaryId).first<number>("count")).toBe(1);
+    await operations.manage({
+      guildId,
+      eventId,
+      tableNumber: 1,
+      action: "hide",
+      actorUserId: `${prefix}:admin`,
+      reason: "Hide while a correction is prepared",
+      idempotencyKey: `${prefix}:hide`,
+    });
+    const hiddenFeed = await (await readSummaryFeed())!.json() as { items: unknown[] };
+    expect(hiddenFeed.items).toHaveLength(0);
+    await operations.manage({
+      guildId,
+      eventId,
+      tableNumber: 1,
+      action: "correction",
+      actorUserId: `${prefix}:admin`,
+      reason: "Correct an inaccurate public detail",
+      publicCorrection: "Correction: the gate was stabilized, not permanently sealed.",
+      idempotencyKey: `${prefix}:correction`,
+    });
+    await operations.manage({
+      guildId,
+      eventId,
+      tableNumber: 1,
+      action: "unhide",
+      actorUserId: `${prefix}:admin`,
+      reason: "Correction is now recorded",
+      idempotencyKey: `${prefix}:unhide`,
+    });
+    expect((await operations.status(guildId, eventId, 1)).events.map(
+      (event) => event.eventKind,
+    )).toEqual(expect.arrayContaining([
+      "edit_locked", "edit_reopened", "hidden", "correction_appended", "unhidden",
+    ]));
+    const correctedFeed = await (await readSummaryFeed())!.json() as {
+      items: Array<{ corrections: Array<{ text: string }> }>;
+    };
+    expect(correctedFeed.items[0]?.corrections).toEqual([
+      { text: "Correction: the gate was stabilized, not permanently sealed.", correctedAt: now },
     ]);
 
     now = first.summary.editExpiresAt! + 1;
@@ -257,9 +364,80 @@ describe("D1 session summary workflow", () => {
         AND revision.is_current = 1
        WHERE summary.guild_id = ?`,
     ).bind(guildId).first<string>("summary_id");
-    await expect(summaries.getForDm(currentSummaryId!, dmUserId)).resolves.toMatchObject({
-      status: "pending",
-      dmUserId,
+    const late = await summaries.submit({
+      summaryId: currentSummaryId!,
+      userId: dmUserId,
+      fields: {
+        summaryText: "The restored session recap was submitted after its deadline.",
+        area: "Bloom",
+        importantEvents: null,
+        bonusRewards: null,
+        otherNotes: null,
+      },
     });
+    expect(late.onTime).toBe(false);
+    expect(await operationsRepository.getQualification(currentSummaryId!)).toMatchObject({
+      qualification: "late",
+      rewardStatus: "not_qualified",
+    });
+
+    await sessions.confirmSession({
+      guildId,
+      eventId,
+      tableNumber: 1,
+      result: "cancelled",
+      confirmedByUserId: `${prefix}:admin`,
+      reason: "Administrator reopened the scenario for a pending-recap test",
+      idempotencyKey: `${prefix}:cancel-late-summary`,
+    });
+    now += 1_000;
+    await sessions.confirmSession({
+      guildId,
+      eventId,
+      tableNumber: 1,
+      result: "completed",
+      confirmedByUserId: `${prefix}:admin`,
+      reason: "Administrator restored the scenario for a pending-recap test",
+      idempotencyKey: `${prefix}:restore-pending-summary`,
+    });
+    await summaries.runScheduled();
+    expect(sent).toHaveLength(4);
+    const pendingSummaryId = await env.DB.prepare(
+      `SELECT summary.summary_id FROM session_summaries summary
+       JOIN session_completion_revisions revision
+         ON revision.completion_revision_id = summary.completion_revision_id
+        AND revision.is_current = 1
+       WHERE summary.guild_id = ?`,
+    ).bind(guildId).first<string>("summary_id");
+    expect(await operations.pending(guildId, dmUserId)).toHaveLength(1);
+    const retryInput = {
+      guildId,
+      eventId,
+      tableNumber: 1,
+      action: "retry_delivery" as const,
+      actorUserId: `${prefix}:admin`,
+      reason: "DM requested a replacement prompt",
+      idempotencyKey: `${prefix}:retry-prompt`,
+    };
+    await Promise.all([
+      operations.manage(retryInput),
+      operations.manage(retryInput),
+    ]);
+    expect((await operations.status(guildId, eventId, 1)).deliveries.find(
+      (delivery) => delivery.deliveryKind === "prompt",
+    )?.repairCount).toBe(1);
+    await summaries.deliverDue();
+    expect(sent).toHaveLength(5);
+    await operations.reportDidNotRun(pendingSummaryId!, dmUserId);
+    expect((await sessions.status(guildId, eventId, 1)).currentRevision?.result).toBe("cancelled");
+    await env.DB.prepare(
+      "DELETE FROM session_summary_admin_events WHERE guild_id = ? AND idempotency_key = ?",
+    ).bind(guildId, `recap:not-run:${pendingSummaryId}`).run();
+    await operations.reportDidNotRun(pendingSummaryId!, dmUserId);
+    expect(await env.DB.prepare(
+      `SELECT count(*) AS count FROM session_summary_admin_events
+       WHERE guild_id = ? AND idempotency_key = ?`,
+    ).bind(guildId, `recap:not-run:${pendingSummaryId}`).first<number>("count")).toBe(1);
+    expect(await operations.pending(guildId, dmUserId)).toHaveLength(0);
   });
 });

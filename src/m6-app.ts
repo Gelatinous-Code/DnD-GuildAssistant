@@ -42,6 +42,7 @@ import {
 } from "./storage/priority-seating-repository";
 import { GuildRepository, type WeeklyEvent } from "./storage/repository";
 import { SessionRepository } from "./storage/session-repository";
+import { SessionRecapOperationsRepository } from "./storage/session-recap-operations-repository";
 import { SessionSummaryRepository } from "./storage/session-summary-repository";
 import { TableThreadRepository } from "./storage/table-thread-repository";
 import { CharacterRepository } from "./storage/character-repository";
@@ -703,6 +704,8 @@ export async function runM6Scheduled(env: Env, now = Date.now()): Promise<void> 
     {
       now: () => now,
       recapsEnabled: String(env.SESSION_RECAP_WORKFLOW_ENABLED).toLowerCase() === "true",
+      rewardPolicyVersion: env.SESSION_RECAP_REWARD_POLICY_VERSION,
+      operations: new SessionRecapOperationsRepository(env.DB),
     },
   ).runScheduled(50);
   await services.sessions.reconcilePendingRewards(50);

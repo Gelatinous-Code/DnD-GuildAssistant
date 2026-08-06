@@ -64,7 +64,7 @@ The bot creates the table discussion and privately sends the selected DM an **Op
 
 ## After you run a session
 
-When the guild enables the recap workflow after approving an incentive, the bot sends the recorded DM a private **Write session summary** button. Include a short public summary, the area, important events, bonus gold or items, and any other useful notes. The on-time deadline is 72 hours after the session; the bot sends one reminder after 48 hours. Your first submission remains editable for seven days.
+When the guild enables the recap workflow after approving an incentive, the bot sends the recorded DM a private **Write session summary** button. Include a short public summary, the area, important events, bonus gold or items, and any other useful notes. The on-time deadline is 72 hours after the session; the bot sends one reminder after 48 hours. Your first submission remains editable for seven days. If DMs are blocked, use `/recap pending`; if the table did not run, use the guarded **Session did not run** button instead of writing notes.
 
 No summary incentive has been approved yet. Submitting on time is recorded, but it does not currently award gold, XP, or tokens. See [session summaries](session-summaries.md) for the exact policy.
 

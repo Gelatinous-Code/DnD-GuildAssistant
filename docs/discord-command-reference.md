@@ -10,6 +10,7 @@ configuration, attendance, or operational details are private.
 | --- | --- |
 | `/help` | Show a private plain-language guide for playing, GMing, priority tokens, or organizing. |
 | `/ping` | Check whether the bot is responding. |
+| `/recap pending` | Privately show fallback buttons for session recaps still awaiting you. |
 | `/priority status` | Show your own available DM priority tokens. |
 | `/priority use` | Preview and confirm priority at one published table. |
 | `/priority release` | Stop using a reserved token while keeping your ordinary table request. |
@@ -77,6 +78,8 @@ These require **Manage Server**.
 | `/priority-admin configure` | Set or disable the private pre-expiration reminder. |
 | `/table-thread-admin status` | Inspect one published table's thread, DM revision, retry, and error state. |
 | `/table-thread-admin manage` | With confirmation and a reason, retry, recreate/redirect, or cancel a table-thread workflow. |
+| `/recap-admin status` | Inspect recap delivery, qualification, visibility, edit-lock, and audit state. |
+| `/recap-admin manage` | With confirmation and a reason, retry delivery, lock/reopen edits, hide/unhide, or append a public correction. |
 
 ## Optional notifications
 

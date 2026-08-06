@@ -4,7 +4,7 @@ The scheduled Worker treats each ended, archived table in the final roster as co
 
 ## DM workflow
 
-The bot sends the DM a private **Write session summary** button. The button opens a Discord form containing:
+The bot sends the DM a private **Write session summary** button plus a guarded **Session did not run** action. Confirming that action appends a cancelled session revision, reconciles progression to zero, stops outstanding recap delivery, and leaves an audit event. The button opens a Discord form containing:
 
 - a required player-facing summary;
 - the required area or location;
@@ -16,16 +16,16 @@ The on-time deadline is 72 hours after the scheduled session end. An unsubmitted
 
 The first successful submission opens a seven-day edit window. Reopening the same DM button prefills the current answers. Each changed submission appends an immutable content revision while the summary row points to the current version.
 
-Only the Discord account recorded as the actual DM can open or submit the form. A correction that cancels the session or supersedes its completion revision makes old buttons inactive and stops outstanding delivery attempts. A corrected completed revision can create a new request for its recorded DM.
+Only the Discord account recorded as the actual DM can open or submit the form. If a DM cannot receive the private prompt, `/recap pending` shows private fallback buttons for their current missing recaps. A correction that cancels the session or supersedes its completion revision makes old buttons inactive and stops outstanding delivery attempts. A corrected completed revision can create a new request for its recorded DM.
 
 ## Publication and incentives
 
 Submitted summaries are structured for the guild website through the protected [website read model](website-read-model.md). Public readers should include only submitted, visible summaries attached to the current completed session revision. Pending forms, delivery failures, Discord interaction tokens, and attendance details are not public content.
 
-The database records whether the first submission met the deadline, but **no gold, XP, priority token, or other incentive is awarded yet**. Guild administrators have not approved a reward policy. That decision can be added later without changing the summary or revision records.
+The database records timely/late qualification exactly once from the first successful submission and keeps that result across later edits. **No gold, XP, priority token, or other incentive is awarded yet** because guild administrators have not approved a reward policy. Production recap creation requires both `SESSION_RECAP_WORKFLOW_ENABLED=true` and a non-empty, immutable `SESSION_RECAP_REWARD_POLICY_VERSION`; leave both at their defaults until #76 defines and implements the reward grant.
 
 ## Administrator corrections
 
-Use `/session attendance` and `/session confirm` to record cancellations, substitute DMs, no-shows, walk-ins, and later corrections. These commands remain the authority for what actually happened; automatic completion is only the default for a finalized table with no contrary result.
+Use `/session attendance` and `/session confirm` to record cancellations, substitute DMs, no-shows, walk-ins, and later outcome corrections. Use `/recap-admin status` for delivery, qualification, publication, edit-lock, and audit state. Use `/recap-admin manage` with a reason and `confirm:True` to retry the prompt, lock or reopen DM edits, hide or unhide the recap, or append a player-facing correction. Corrections are append-only and appear beside the original GM text; admins never silently rewrite it. These commands remain the authority for what actually happened; automatic completion is only the default for a finalized table with no contrary result.
 
 If Discord cannot deliver a prompt, the outbox records a bounded error category and retries with backoff. Operators can inspect D1 delivery state without storing a bot token, message body, or interaction token in the summary tables.

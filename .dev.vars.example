@@ -8,3 +8,5 @@ DISCORD_BOT_TOKEN=paste_the_reset_bot_token_here
 
 # Keep false until the admins approve and configure the recap reward.
 SESSION_RECAP_WORKFLOW_ENABLED=false
+# Leave blank until admins approve a named, immutable reward policy.
+SESSION_RECAP_REWARD_POLICY_VERSION=

@@ -10,6 +10,7 @@ import { InteractionResponseType } from "../src/discord";
 import { renderSessionSummaryModal } from "../src/session-summary-app";
 import {
   parseSummaryCustomId,
+  summaryDidNotRunCustomId,
   summaryOpenCustomId,
   summarySubmitCustomId,
 } from "../src/session-summary-service";
@@ -37,6 +38,11 @@ function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
     hiddenAt: null,
     hiddenByUserId: null,
     hiddenReason: null,
+    rewardPolicyVersion: "test-reward-v1",
+    authorEditStatus: "open",
+    editLockedAt: null,
+    editLockedByUserId: null,
+    editLockReason: null,
     version: 1,
     createdAt: 2_000,
     updatedAt: 2_000,
@@ -79,6 +85,14 @@ describe("session summary policy", () => {
     });
     expect(parseSummaryCustomId(summarySubmitCustomId("summary-1"))).toEqual({
       action: "submit",
+      summaryId: "summary-1",
+    });
+    expect(parseSummaryCustomId(summaryDidNotRunCustomId("summary-1"))).toEqual({
+      action: "not_run",
+      summaryId: "summary-1",
+    });
+    expect(parseSummaryCustomId(summaryDidNotRunCustomId("summary-1", true))).toEqual({
+      action: "not_run_confirm",
       summaryId: "summary-1",
     });
     expect(parseSummaryCustomId("guild:summary:delete:summary-1")).toBeNull();
