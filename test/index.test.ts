@@ -14,6 +14,7 @@ const env = {
   DISCORD_BOT_TOKEN: "test-bot-token",
   DISCORD_APPLICATION_ID: "1533171671886725293",
   DISCORD_TEST_GUILD_ID: "1533181439376494642",
+  SESSION_RECAP_WORKFLOW_ENABLED: "false",
 } satisfies Env;
 
 function discordRequest(body: unknown): Request {

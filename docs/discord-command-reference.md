@@ -70,11 +70,13 @@ These require **Manage Server**.
 | --- | --- |
 | `/session status` | Review the private attendance draft and reward state for a table. |
 | `/session attendance` | Record a no-show, substitute, walk-in, or other difference from the published roster. |
-| `/session confirm` | Freeze the result of a completed or cancelled table and reconcile the DM reward once. |
+| `/session confirm` | Override or correct the automatic completed result with an audited completed/cancelled revision and reconcile rewards. |
 | `/priority-admin diagnose` | Privately trace token, seating, completion, and message-delivery state. |
 | `/priority-admin correct` | Append a confirmed correction to an incorrect reward grant. |
 | `/priority-admin refund` | Make an exceptional confirmed token refund. |
 | `/priority-admin configure` | Set or disable the private pre-expiration reminder. |
+| `/table-thread-admin status` | Inspect one published table's thread, DM revision, retry, and error state. |
+| `/table-thread-admin manage` | With confirmation and a reason, retry, recreate/redirect, or cancel a table-thread workflow. |
 
 ## Optional notifications
 

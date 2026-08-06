@@ -1,9 +1,6 @@
 # Session completion and attendance policy
 
-Publishing, finalizing, or archiving a weekly roster proves what the guild
-planned. None of those actions prove that a game actually ran, and none award a
-DM priority token. Rewards begin only when authorized guild staff explicitly
-confirm an archived table's actual outcome through `/session`.
+The guild uses the finalized roster as the default account of what ran. After an event is ended and archived, the scheduled Worker automatically records each unchanged finalized table as completed. Administrators use `/session` to record cancellations, attendance differences, substitute DMs, and corrections during or after reconciliation.
 
 ## Source boundary
 
@@ -17,26 +14,21 @@ guild:
 
 The final plan, table, assignment, and manifest rows remain immutable. Actual
 attendance is stored as a separate append-only outcome linked to that source.
-The archive scheduler never calls the reward service.
+The archive scheduler calls the same idempotent completion and reward service used by administrators; it does not maintain a separate reward path.
 
 ## Organizer workflow
 
-1. Run `/session status table_number:…` to seed or inspect a private working
-   draft. The planned DM and assigned players initially default to `attended`.
-2. Record only deviations with `/session attendance`: no-shows, substitutes,
-   walk-ins, or an explicitly attended replacement DM/player. A substitute must
-   identify the planned member they replace.
-3. Review status. Attendance is never posted to the public operations or table
-   channel.
-4. Run `/session confirm result:Completed confirm:True` or
-   `/session confirm result:Cancelled confirm:True`.
+1. Let unchanged finalized tables complete automatically after archive.
+2. For a cancellation or attendance difference, run `/session status table_number:…`, then record deviations with `/session attendance`. A substitute must identify the planned member they replace.
+3. Run `/session confirm result:Completed confirm:True` or `/session confirm result:Cancelled confirm:True`. Repeating an unchanged result is idempotent; changing it appends a correction.
+4. Review `/session status`. Attendance remains private and is never added to public session notes.
 
 A completed table must contain exactly one actual attending DM. Player
 attendance does not affect reward eligibility. A cancelled table or a planned DM
 who did not run the game earns nothing; an explicitly recorded substitute DM
 earns the reward.
 
-One eligible confirmed session awards exactly two DM priority tokens under
+One eligible automatically or manually confirmed session awards exactly two DM priority tokens under
 `dm-priority-v1`. The persisted confirmation time—not a retry time—determines
 the tokens' earned and expiration boundaries.
 
@@ -69,8 +61,7 @@ commands and sanitized administrator diagnostics. Public rosters and ordinary
 weekly exports contain the planned/final roster, not actual attendance or a
 member's lifetime reward history.
 
-Store Discord user IDs, role/outcome codes, replacement links, bounded audit
-reasons, and timestamps. Do not store free-form player notes. Session outcome
+Store Discord user IDs, role/outcome codes, replacement links, bounded audit reasons, and timestamps. Structured DM-authored public session notes are stored separately from private attendance; see [session summaries](session-summaries.md). Session outcome
 data is retained for reward disputes while the guild remains configured and is
 removed through the same tenant-cascade/deletion procedure documented in the
 operations guide.

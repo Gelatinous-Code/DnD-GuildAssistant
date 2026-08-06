@@ -18,7 +18,7 @@ In Review mode, most of the week is automatic and one decision remains yours:
 3. Run `/week status`. Check the selected GMs, table sizes, reserved players,
    per-tier reservations and waitlists.
 4. If the draft is sound, run `/week publish`.
-5. The bot handles table choices, open seating, the final roster, and archive.
+5. The bot creates each table thread, privately links its DM, then handles table choices, open seating, the final roster, and archive.
 
 In Autopilot, step 4 is automatic too. Keep the guild in Review until the
 organizers trust a complete live week.
@@ -52,16 +52,13 @@ the stored publication instead of treating the retry as a new set of tables.
 
 ## After game night
 
-For each table:
+Finalized tables are completed automatically after the archived event ends. For exceptions and corrections:
 
-1. Run `/session status`.
-2. Record only differences from the published roster with
-   `/session attendance`—for example a no-show, substitute, or walk-in.
-3. Run `/session status` again and review the private draft.
-4. Run `/session confirm` and choose **Completed** or **Cancelled**.
+1. Run `/session status` for the affected table.
+2. Record differences from the published roster with `/session attendance`—for example a no-show, substitute, or walk-in.
+3. Run `/session confirm` and choose **Completed** or **Cancelled**. A later confirmation appends a correction instead of rewriting history.
 
-A completed eligible DM session awards exactly two priority tokens. Publication
-or archive alone does not award them. Use the
+An automatically or manually completed eligible DM session awards exactly two priority tokens, 2 XP, and level-based gold. Players who attended receive 1 XP and level-based gold. After administrators approve an incentive and enable recaps, the actual DM receives a private session-summary form; see [session summaries](session-summaries.md). Use the
 [DM priority operations runbook](dm-priority-operations.md) for corrections,
 blocked DMs, disputes, or exceptional refunds.
 
@@ -75,7 +72,7 @@ blocked DMs, disputes, or exceptional refunds.
 - A single scheduled action should not happen: use `/week skip` for that
   occurrence.
 
-Do not edit bot messages or database records to repair the roster.
+Use `/table-thread-admin status` and the confirmed manage action to retry, recreate/redirect, or cancel a broken table thread. Do not edit bot messages or database records to repair the roster.
 
 ## Stop automation safely
 

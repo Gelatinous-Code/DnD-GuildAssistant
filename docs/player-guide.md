@@ -58,10 +58,19 @@ Read the [GM selection policy](gm-priority-policy.md) if you want the exact
 ranking and tie-break rules. See [Weekly game tiers](game-tiers.md) for tier
 choices, corrections, and same-tier waitlist behavior.
 
+## When your table is published
+
+The bot creates the table discussion and privately sends the selected DM an **Open thread** button. The DM writes the adventure description and any character questions in their own style. The bot does not add or mention players; the DM tags the current roster only after the introduction is ready.
+
+## After you run a session
+
+When the guild enables the recap workflow after approving an incentive, the bot sends the recorded DM a private **Write session summary** button. Include a short public summary, the area, important events, bonus gold or items, and any other useful notes. The on-time deadline is 72 hours after the session; the bot sends one reminder after 48 hours. Your first submission remains editable for seven days.
+
+No summary incentive has been approved yet. Submitting on time is recorded, but it does not currently award gold, XP, or tokens. See [session summaries](session-summaries.md) for the exact policy.
+
 ## DM priority tokens
 
-After a game ends, an organizer confirms which tables ran and who actually
-participated. An eligible DM receives two priority tokens. A token can protect a
+After an archived game ends, the bot assumes each finalized table ran unless an organizer records a cancellation or correction. An eligible actual DM receives two priority tokens. A token can protect a
 player seat in a later week.
 
 The member commands are:

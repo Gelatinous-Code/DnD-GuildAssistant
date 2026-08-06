@@ -207,6 +207,7 @@ week.
 | D1 reports a missing table | Confirm the binding and remote migration list before retrying. |
 | A final roster is missing | Restore channel permissions, inspect status, and retry only finalization. |
 | A member's token message is missing | Check `/priority-admin diagnose`; message delivery does not create or erase the token. |
+| A table thread or DM link is missing | Fix the parent-channel permissions, inspect `/table-thread-admin status`, then use a confirmed reasoned retry or recreate. |
 
 ## Credential recovery
 

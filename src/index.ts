@@ -5,6 +5,7 @@ import {
   type DiscordInteraction,
 } from "./discord";
 import { handleDiscordInteraction, handleScheduled } from "./app";
+import { handleWebsiteReadRequest } from "./website-read-model";
 
 const MAX_INTERACTION_BYTES = 1024 * 1024;
 
@@ -57,6 +58,8 @@ export async function handleRequest(
   context?: ExecutionContext,
 ): Promise<Response> {
   if (request.method === "GET") {
+    const websiteResponse = await handleWebsiteReadRequest(request, env);
+    if (websiteResponse !== null) return websiteResponse;
     return json({
       name: "DnD New Dawn Guild Assistant",
       status: "ready",

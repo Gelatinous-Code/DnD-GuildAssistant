@@ -14,6 +14,7 @@ const env = {
   DISCORD_BOT_TOKEN: "bot-secret",
   DISCORD_APPLICATION_ID: "1533171671886725293",
   DISCORD_TEST_GUILD_ID: "1533181439376494642",
+  SESSION_RECAP_WORKFLOW_ENABLED: "false",
 } satisfies Env;
 
 describe("deferred Discord interactions", () => {

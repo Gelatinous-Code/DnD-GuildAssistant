@@ -1,3 +1,8 @@
+import { handleCharacterCommand } from "./character-app";
+import { handleProgressionCommand } from "./progression-app";
+import { handleTableThreadCommand } from "./table-thread-app";
+import { handleSessionSummaryInteraction } from "./session-summary-app";
+import { parseSummaryCustomId } from "./session-summary-service";
 import {
   DiscordRestClient,
   discordTimestamp,
@@ -273,7 +278,7 @@ function helpContent(interaction: DiscordInteraction): string {
       "",
       "**Normal Review week:** use `/week status` to inspect the draft, then `/week publish` when it is correct.",
       "",
-      "**After a game:** `/session status`, record only attendance differences, then `/session confirm`.",
+      "**After a game:** finalized tables complete automatically. Use `/session attendance` and `/session confirm` to record cancellations, substitutes, or corrections; DMs receive a private summary form.",
       "",
       "**Stop safely:** `/guild automation mode:Paused confirm:True`, then check `/week status` and `/guild doctor`.",
       "",
@@ -1402,7 +1407,13 @@ async function executeDiscordInteraction(
 ): Promise<Response> {
   try {
     if (interaction.type === InteractionType.MessageComponent) {
+      const summaryResponse = await handleSessionSummaryInteraction(interaction, env);
+      if (summaryResponse !== null) return summaryResponse;
       return await handleComponent(interaction, env);
+    }
+    if (interaction.type === InteractionType.ModalSubmit) {
+      return (await handleSessionSummaryInteraction(interaction, env)) ??
+        ephemeral("I don't recognize that form.");
     }
     if (interaction.type !== InteractionType.ApplicationCommand) {
       return ephemeral("I don't recognize that interaction.");
@@ -1422,6 +1433,12 @@ async function executeDiscordInteraction(
       );
     }
     if (command === "reminder") return await handleReminderCommand(interaction, env);
+    const characterResponse = await handleCharacterCommand(interaction, env);
+    if (characterResponse !== null) return characterResponse;
+    const progressionResponse = await handleProgressionCommand(interaction, env);
+    if (progressionResponse !== null) return progressionResponse;
+    const tableThreadResponse = await handleTableThreadCommand(interaction, env);
+    if (tableThreadResponse !== null) return tableThreadResponse;
     const m6Response = await handleM6Command(interaction, env);
     if (m6Response !== null) return m6Response;
     return ephemeral("I don't recognize that command yet.");
@@ -1466,7 +1483,10 @@ async function finishDeferredInteraction(
     data?: Record<string, unknown>;
     attachment?: InternalAttachmentResponse;
   };
-  if (interaction.type === InteractionType.ApplicationCommand) {
+  if (
+    interaction.type === InteractionType.ApplicationCommand ||
+    interaction.type === InteractionType.ModalSubmit
+  ) {
     const { flags: _initialOnlyFlags, ...messageData } = body.data ?? {
       content: "The command completed without a response body.",
     };
@@ -1519,10 +1539,14 @@ export async function handleDiscordInteraction(
   env: Env,
   context?: ExecutionContext,
 ): Promise<Response> {
+  const opensSummaryModal =
+    interaction.type === InteractionType.MessageComponent &&
+    parseSummaryCustomId(interaction.data?.custom_id)?.action === "open";
   const canDefer =
     context !== undefined &&
     Boolean(interaction.token) &&
     interaction.type !== InteractionType.Ping &&
+    !opensSummaryModal &&
     !(
       interaction.type === InteractionType.ApplicationCommand &&
       interaction.data?.name === "ping"

@@ -61,8 +61,10 @@ permissions:
 - Send Messages
 - Embed Links
 - Read Message History
+- Create Public Threads
+- Send Messages in Threads
 
-Do not give the bot Administrator.
+Add Manage Threads only if organizers will use the archive/lock repair controls. Do not give the bot Administrator.
 
 ### 2. Save the channel
 

@@ -5,3 +5,6 @@ DISCORD_TEST_GUILD_ID=1533181439376494642
 # DISCORD_GUILD_ID=paste_the_target_server_id_here
 DISCORD_PUBLIC_KEY=paste_the_public_key_from_discord_here
 DISCORD_BOT_TOKEN=paste_the_reset_bot_token_here
+
+# Keep false until the admins approve and configure the recap reward.
+SESSION_RECAP_WORKFLOW_ENABLED=false
