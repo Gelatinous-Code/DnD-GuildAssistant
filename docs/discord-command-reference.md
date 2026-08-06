@@ -10,6 +10,7 @@ configuration, attendance, or operational details are private.
 | --- | --- |
 | `/help` | Show a private plain-language guide for playing, GMing, priority tokens, or organizing. |
 | `/ping` | Check whether the bot is responding. |
+| `/recap pending` | Privately show fallback buttons for session recaps still awaiting you. |
 | `/priority status` | Show your own available DM priority tokens. |
 | `/priority use` | Preview and confirm priority at one published table. |
 | `/priority release` | Stop using a reserved token while keeping your ordinary table request. |
@@ -70,11 +71,15 @@ These require **Manage Server**.
 | --- | --- |
 | `/session status` | Review the private attendance draft and reward state for a table. |
 | `/session attendance` | Record a no-show, substitute, walk-in, or other difference from the published roster. |
-| `/session confirm` | Freeze the result of a completed or cancelled table and reconcile the DM reward once. |
+| `/session confirm` | Override or correct the automatic completed result with an audited completed/cancelled revision and reconcile rewards. |
 | `/priority-admin diagnose` | Privately trace token, seating, completion, and message-delivery state. |
 | `/priority-admin correct` | Append a confirmed correction to an incorrect reward grant. |
 | `/priority-admin refund` | Make an exceptional confirmed token refund. |
 | `/priority-admin configure` | Set or disable the private pre-expiration reminder. |
+| `/table-thread-admin status` | Inspect one published table's thread, DM revision, retry, and error state. |
+| `/table-thread-admin manage` | With confirmation and a reason, retry, recreate/redirect, or cancel a table-thread workflow. |
+| `/recap-admin status` | Inspect recap delivery, qualification, visibility, edit-lock, and audit state. |
+| `/recap-admin manage` | With confirmation and a reason, retry delivery, lock/reopen edits, hide/unhide, or append a public correction. |
 
 ## Optional notifications
 

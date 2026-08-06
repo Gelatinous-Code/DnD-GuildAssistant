@@ -25,6 +25,7 @@ export const ButtonStyle = {
   Secondary: 2,
   Success: 3,
   Danger: 4,
+  Link: 5,
 } as const;
 
 export interface DiscordUser {
@@ -57,6 +58,8 @@ export interface DiscordChannel {
   type: number;
   guild_id?: Snowflake;
   name?: string;
+  parent_id?: Snowflake | null;
+  message?: DiscordMessage;
   permission_overwrites?: DiscordPermissionOverwrite[];
 }
 
@@ -70,7 +73,8 @@ export interface DiscordPermissionOverwrite {
 export interface DiscordButton {
   type: typeof ComponentType.Button;
   style: (typeof ButtonStyle)[keyof typeof ButtonStyle];
-  custom_id: string;
+  custom_id?: string;
+  url?: string;
   label: string;
   disabled?: boolean;
   emoji?: { name: string };
@@ -441,6 +445,48 @@ export class DiscordRestClient {
   getChannel(channelId: Snowflake): Promise<DiscordChannel> {
     requireSnowflake(channelId, "channelId");
     return this.#request("GET", `/channels/${channelId}`);
+  }
+
+  startThreadFromMessage(
+    channelId: Snowflake,
+    messageId: Snowflake,
+    input: { name: string; auto_archive_duration?: 60 | 1440 | 4320 | 10080 },
+  ): Promise<DiscordChannel> {
+    requireSnowflake(channelId, "channelId");
+    requireSnowflake(messageId, "messageId");
+    return this.#request(
+      "POST",
+      `/channels/${channelId}/messages/${messageId}/threads`,
+      input,
+    );
+  }
+
+  startForumThread(
+    channelId: Snowflake,
+    input: {
+      name: string;
+      auto_archive_duration?: 60 | 1440 | 4320 | 10080;
+      message: DiscordMessagePayload;
+    },
+  ): Promise<DiscordChannel> {
+    requireSnowflake(channelId, "channelId");
+    return this.#request("POST", `/channels/${channelId}/threads`, {
+      ...input,
+      message: safePayload(input.message),
+    });
+  }
+
+  listActiveGuildThreads(guildId: Snowflake): Promise<{ threads: DiscordChannel[] }> {
+    requireSnowflake(guildId, "guildId");
+    return this.#request("GET", `/guilds/${guildId}/threads/active`);
+  }
+
+  editChannel(
+    channelId: Snowflake,
+    input: { archived?: boolean; locked?: boolean; name?: string },
+  ): Promise<DiscordChannel> {
+    requireSnowflake(channelId, "channelId");
+    return this.#request("PATCH", `/channels/${channelId}`, input);
   }
 
   createDmChannel(userId: Snowflake): Promise<DiscordChannel> {

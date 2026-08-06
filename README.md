@@ -50,7 +50,9 @@ setup, deployment, database, or npm commands.
 - Review mode for organizers who want to approve tables, or Autopilot after the
   guild is comfortable with the workflow.
 - Optional GM-signup, player-reminder, and organizer-alert role mentions.
-- Final rosters, attendance confirmation, and DM priority tokens.
+- Final rosters, automatic session completion, per-character XP and gold, and DM priority tokens.
+- Automatic pre-session threads with a private DM deep link and audited repair controls.
+- Gated private summary forms, a protected website read model, reminders, and a seven-day edit window; delivery stays off until the guild approves an incentive.
 - Safe retries and an audit trail so a timeout does not create duplicate weeks,
   tables, reminders, or rewards.
 
@@ -61,9 +63,10 @@ computer has to remain switched on.
 ## Permissions and privacy
 
 The bot should not receive Discord Administrator permission. Its core channel
-permissions are View Channel, Send Messages, Embed Links, and Read Message
-History in each configured workflow channel. Attach Files is optional and is
-needed only for CSV export. Manage Roles is not required.
+permissions are View Channel, Send Messages, Embed Links, Read Message History,
+Create Public Threads, and Send Messages in Threads in each configured workflow
+channel. Attach Files is optional for CSV export, and Manage Threads is optional
+for administrator archive/repair controls. Manage Roles is not required.
 
 Admin responses and priority-token details are private. The bot restricts
 mentions, does not require Google or Raid Helper credentials, and provides a

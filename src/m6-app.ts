@@ -24,6 +24,7 @@ import { PriorityNotificationService } from "./priority-notification-service";
 import { reconcilePublishedPlanPriority } from "./priority-publish-reconciler";
 import { PriorityRewardCoordinator } from "./priority-reward-coordinator";
 import { PriorityService } from "./priority-service";
+import { ProgressionService } from "./progression-service";
 import {
   renderPriorityConfirmation,
   renderPriorityStatus,
@@ -31,6 +32,8 @@ import {
 } from "./priority-ui";
 import { PriorityWorkflowService } from "./priority-workflow-service";
 import { SessionService, SessionSourceUnavailableError } from "./session-service";
+import { SessionSummaryService } from "./session-summary-service";
+import { TableThreadService } from "./table-thread-service";
 import { PriorityConfirmationRepository } from "./storage/priority-confirmation-repository";
 import { PriorityNotificationRepository } from "./storage/priority-notification-repository";
 import { PriorityRepository } from "./storage/priority-repository";
@@ -39,6 +42,12 @@ import {
 } from "./storage/priority-seating-repository";
 import { GuildRepository, type WeeklyEvent } from "./storage/repository";
 import { SessionRepository } from "./storage/session-repository";
+import { SessionRecapOperationsRepository } from "./storage/session-recap-operations-repository";
+import { SessionSummaryRepository } from "./storage/session-summary-repository";
+import { TableThreadRepository } from "./storage/table-thread-repository";
+import { CharacterRepository } from "./storage/character-repository";
+import { ProgressionRepository } from "./storage/progression-repository";
+import { WebsiteReadRepository } from "./storage/website-read-repository";
 import { WeekService } from "./week-service";
 
 export interface M6Services {
@@ -52,6 +61,7 @@ export interface M6Services {
   notifications: PriorityNotificationService;
   workflow: PriorityWorkflowService;
   sessionRepository: SessionRepository;
+  progression: ProgressionService;
   sessions: SessionService;
 }
 
@@ -85,6 +95,10 @@ export function createM6Services(env: Env): M6Services {
     },
   });
   const sessionRepository = new SessionRepository(env.DB);
+  const progression = new ProgressionService(
+    new ProgressionRepository(env.DB),
+    new CharacterRepository(env.DB),
+  );
   return {
     repository,
     discord,
@@ -96,7 +110,10 @@ export function createM6Services(env: Env): M6Services {
     notifications,
     workflow: new PriorityWorkflowService(repository, seating, week, { notifications }),
     sessionRepository,
-    sessions: new SessionService(sessionRepository, priorityRepository, priorityRewards),
+    progression,
+    sessions: new SessionService(sessionRepository, priorityRepository, priorityRewards, {
+      progression,
+    }),
   };
 }
 
@@ -675,7 +692,24 @@ export async function reconcilePriorityAfterPublish(
 export async function runM6Scheduled(env: Env, now = Date.now()): Promise<void> {
   const services = createM6Services(env);
   await new PriorityConfirmationRepository(env.DB).deleteExpired(now, 500);
+  await new TableThreadService(
+    new TableThreadRepository(env.DB),
+    services.discord,
+    { now: () => now },
+  ).runScheduled(50);
+  await new SessionSummaryService(
+    new SessionSummaryRepository(env.DB),
+    services.sessions,
+    services.discord,
+    {
+      now: () => now,
+      recapsEnabled: String(env.SESSION_RECAP_WORKFLOW_ENABLED).toLowerCase() === "true",
+      rewardPolicyVersion: env.SESSION_RECAP_REWARD_POLICY_VERSION,
+      operations: new SessionRecapOperationsRepository(env.DB),
+    },
+  ).runScheduled(50);
   await services.sessions.reconcilePendingRewards(50);
+  await new WebsiteReadRepository(env.DB).deleteExpiredRateLimits(now, 1_000);
   const guilds = await env.DB
     .prepare(
       `SELECT DISTINCT guild_id FROM dm_priority_credits

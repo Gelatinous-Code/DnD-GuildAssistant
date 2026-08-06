@@ -6,6 +6,7 @@ import {
   type SessionParticipant,
 } from "./domain/session-completion";
 import type { PriorityService } from "./priority-service";
+import type { ProgressionService } from "./progression-service";
 import type {
   DmPriorityGrant,
   PriorityRepository,
@@ -47,6 +48,7 @@ export type SessionPriorityService = Pick<
 export interface SessionServiceOptions {
   now?: () => number;
   id?: () => string;
+  progression?: Pick<ProgressionService, "reconcileSession">;
 }
 
 export interface RecordSessionAttendanceInput extends SessionAttendanceDeviation {
@@ -120,6 +122,7 @@ function errorKind(error: unknown): string {
 export class SessionService {
   private readonly now: () => number;
   private readonly id: () => string;
+  private readonly progression?: Pick<ProgressionService, "reconcileSession">;
 
   constructor(
     private readonly sessions: SessionServiceRepository,
@@ -129,6 +132,7 @@ export class SessionService {
   ) {
     this.now = options.now ?? Date.now;
     this.id = options.id ?? defaultId;
+    this.progression = options.progression;
   }
 
   private async source(
@@ -387,6 +391,24 @@ export class SessionService {
         activeGrant = granted.grant;
       }
 
+      if (this.progression) {
+        const participants = await this.sessions.listRevisionParticipants(
+          guildId,
+          revision.completionRevisionId,
+        );
+        await this.progression.reconcileSession({
+          guildId,
+          sessionId,
+          sourceEventId: session.sourceEventId,
+          sourceTableId: session.sourceTableId,
+          completionRevisionId: revision.completionRevisionId,
+          result: revision.result,
+          participants,
+          actorUserId: revision.confirmedByUserId,
+          reason: revision.reason,
+          occurredAt: revision.confirmedAt,
+        });
+      }
       const syncedAt = this.now();
       await this.sessions.markRewardSynced({
         guildId,

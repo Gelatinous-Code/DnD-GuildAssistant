@@ -52,7 +52,7 @@ On **Installation**:
 
 1. Enable **Guild Install**. User Install is not needed.
 2. Add the `applications.commands` and `bot` scopes.
-3. Select View Channels, Send Messages, Embed Links, and Read Message History.
+3. Select View Channels, Send Messages, Embed Links, Read Message History, Create Public Threads, and Send Messages in Threads. Add Manage Threads only for administrator archive/repair controls.
 4. Add Attach Files only if administrators will use `/week export`.
 5. Do not grant Manage Roles. Member role assignment is reserved for server admins.
 

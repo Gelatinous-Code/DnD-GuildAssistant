@@ -2,6 +2,7 @@ export const InteractionType = {
   Ping: 1,
   ApplicationCommand: 2,
   MessageComponent: 3,
+  ModalSubmit: 5,
 } as const;
 
 export const InteractionResponseType = {
@@ -10,6 +11,7 @@ export const InteractionResponseType = {
   DeferredChannelMessageWithSource: 5,
   DeferredUpdateMessage: 6,
   UpdateMessage: 7,
+  Modal: 9,
 } as const;
 
 export const MessageFlags = {
@@ -29,6 +31,7 @@ export interface DiscordInteraction {
     custom_id?: string;
     component_type?: number;
     options?: DiscordInteractionOption[];
+    components?: DiscordInteractionComponent[];
   };
   member?: {
     user?: DiscordUser;
@@ -41,6 +44,13 @@ export interface DiscordInteraction {
     id?: string;
     channel_id?: string;
   };
+}
+
+export interface DiscordInteractionComponent {
+  type: number;
+  custom_id?: string;
+  value?: string;
+  components?: DiscordInteractionComponent[];
 }
 
 export interface DiscordInteractionOption {
