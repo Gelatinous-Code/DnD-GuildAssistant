@@ -36,7 +36,8 @@
       },
       "itemFields": [
         "summaryId", "sessionId", "eventId", "eventTitle", "sessionStartsAt",
-        "sessionEndsAt", "tableNumber", "tableTitle", "gameTier", "area",
+        "sessionEndsAt", "tableNumber", "tableTitle", "gmName", "seasonName",
+        "gameTier", "area",
         "summary", "importantEvents", "bonusRewards", "otherNotes", "spoilers",
         "source", "policy", "publicationStatus", "moderation", "corrections",
         "firstSubmittedAt", "lastSubmittedAt", "revision"
@@ -57,6 +58,7 @@
         "journalId", "officialSummaryId", "sessionId", "eventId", "eventTitle",
         "sessionEndsAt", "characterId", "characterName", "title", "journal",
         "spoilers", "source", "publicationStatus", "moderation", "firstSubmittedAt",
+        "editExpiresAt",
         "lastSubmittedAt", "revision"
       ]
     },

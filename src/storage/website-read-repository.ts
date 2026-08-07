@@ -16,6 +16,8 @@ export interface WebsiteSummaryItem {
   sessionEndsAt: number;
   tableNumber: number;
   tableTitle: string;
+  gmName: string | null;
+  seasonName: string | null;
   gameTier: number;
   area: string;
   summary: string;
@@ -51,6 +53,8 @@ type WebsiteSummaryRow = {
   session_ends_at: number;
   table_number: number;
   table_title: string;
+  gm_name: string | null;
+  season_name: string | null;
   game_tier: number;
   area: string;
   summary_text: string;
@@ -119,6 +123,8 @@ function itemFromRow(
     sessionEndsAt: row.session_ends_at,
     tableNumber: row.table_number,
     tableTitle: row.table_title,
+    gmName: row.gm_name,
+    seasonName: row.season_name,
     gameTier: row.game_tier,
     area: row.area,
     summary: row.summary_text,
@@ -197,6 +203,24 @@ export class WebsiteReadRepository {
               event.event_id, event.title AS event_title,
               event.starts_at, summary.session_ends_at,
               table_row.table_number, table_row.title AS table_title,
+              COALESCE((
+                SELECT signup.display_name
+                FROM signups signup
+                WHERE signup.event_id = event.event_id
+                  AND signup.user_id = completion.actual_dm_user_id
+                ORDER BY signup.updated_at DESC
+                LIMIT 1
+              ), CASE WHEN completion.actual_dm_user_id = table_row.gm_user_id
+                THEN table_row.gm_display_name ELSE NULL END) AS gm_name,
+              (
+                SELECT season.name
+                FROM progression_seasons season
+                WHERE season.guild_id = summary.guild_id
+                  AND season.starts_at <= event.starts_at
+                  AND (season.ended_at IS NULL OR event.starts_at < season.ended_at)
+                ORDER BY season.starts_at DESC, season.season_id DESC
+                LIMIT 1
+              ) AS season_name,
               table_row.game_tier, summary.area, summary.summary_text,
               summary.important_events, summary.bonus_rewards,
               summary.other_notes, summary.publication_status,

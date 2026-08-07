@@ -31,7 +31,8 @@ Authorization: Bearer <Discord OAuth token>
 Optional filters are `limit` (1–50, default 20), opaque `cursor`, `tier` (1–3),
 and a case-insensitive `area` substring of at most 100 characters. Members see
 only current submitted, visible recaps for current completed session revisions.
-Items contain event/table labels, spoiler metadata, source completion revision,
+Items contain event/table labels, the confirmed GM display name, the matching
+progression-season name when one exists, spoiler metadata, source completion revision,
 policy metadata, dates, area, summary, important events, bonus gold/items, other
 notes, current author revision, and public corrections.
 
@@ -46,7 +47,7 @@ version rules.
 
 | Route | Contract | Notes |
 | --- | --- | --- |
-| `/api/v1/guilds/{guild_id}/player-journals` | `player-journals.v1` | Visible current journals with spoiler/source metadata; filters: `character_id`, `event_id`; administrators may use `visibility=all`. |
+| `/api/v1/guilds/{guild_id}/player-journals` | `player-journals.v1` | Visible current journals with spoiler metadata, edit deadline, completion revision, and nullable Discord publication thread/message IDs; filters: `character_id`, `event_id`; administrators may use `visibility=all`. |
 | `/api/v1/guilds/{guild_id}/historical-summaries` | `historical-summaries.v1` | Published immutable imports only; optional exact `season` filter. |
 | `/api/v1/guilds/{guild_id}/progression-seasons` | `progression-seasons.v1` | The verified member's characters, main/frozen/archived state, per-season balances, level, and provider-authored next-level progress, plus ledger history and reversal/source provenance. Filters: `season` and owned `character_id`. |
 

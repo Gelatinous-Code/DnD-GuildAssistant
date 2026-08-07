@@ -26,10 +26,13 @@ type JournalRow = {
   title: string;
   journal_text: string;
   first_submitted_at: number;
+  edit_expires_at: number;
   last_submitted_at: number;
   publication_status: "visible" | "hidden";
   hidden_at: number | null;
   hidden_reason: string | null;
+  discord_thread_id: string | null;
+  discord_message_id: string | null;
   version: number;
 };
 
@@ -126,8 +129,9 @@ export class WebsiteLibraryRepository {
               event.title AS event_title, event.ends_at AS session_ends_at,
               character.character_id, character.name AS character_name,
               journal.title, journal.journal_text, journal.first_submitted_at,
-              journal.last_submitted_at, journal.publication_status,
-              journal.hidden_at, journal.hidden_reason, journal.version
+              journal.edit_expires_at, journal.last_submitted_at, journal.publication_status,
+              journal.hidden_at, journal.hidden_reason, journal.version,
+              journal.discord_thread_id, journal.discord_message_id
        FROM player_journals journal
        JOIN characters character
          ON character.guild_id = journal.guild_id
@@ -180,13 +184,18 @@ export class WebsiteLibraryRepository {
         journal: row.journal_text,
         spoilers: { scope: "session" as const, eventId: row.event_id,
           availableAfter: row.session_ends_at },
-        source: { completionRevisionId: row.completion_revision_id },
+        source: {
+          completionRevisionId: row.completion_revision_id,
+          discordThreadId: row.discord_thread_id,
+          discordMessageId: row.discord_message_id,
+        },
         publicationStatus: row.publication_status,
         moderation: row.publication_status === "hidden" && row.hidden_at !== null
           && row.hidden_reason !== null
           ? { hiddenAt: row.hidden_at, reason: row.hidden_reason }
           : null,
         firstSubmittedAt: row.first_submitted_at,
+        editExpiresAt: row.edit_expires_at,
         lastSubmittedAt: row.last_submitted_at,
         revision: row.version - 1,
       })),

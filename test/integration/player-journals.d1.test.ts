@@ -226,6 +226,12 @@ describe("D1 player journals", () => {
       characterName: "Journal Hero",
       title: "A Hero's Reflection",
       journal: "The ruined observatory changed how my character sees the stars.",
+      editExpiresAt: submitted.editExpiresAt,
+      source: {
+        completionRevisionId: expect.any(String),
+        discordThreadId: "123456789",
+        discordMessageId: "987654321",
+      },
     })]);
     expect(journalFeed.items[0]).not.toHaveProperty("authorUserId");
 
