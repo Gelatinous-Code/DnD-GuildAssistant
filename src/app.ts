@@ -5,7 +5,11 @@ import {
 } from "./player-journal-app";
 import { parseJournalCustomId } from "./player-journal-service";
 import { handleProgressionCommand } from "./progression-app";
-import { handleShopCommand, handleShopInteraction } from "./shop-app";
+import {
+  handleShopAutocomplete,
+  handleShopCommand,
+  handleShopInteraction,
+} from "./shop-app";
 import { ShopService } from "./shop-service";
 import { handleTableThreadCommand } from "./table-thread-app";
 import {
@@ -27,6 +31,7 @@ import {
   type DiscordInteraction,
 } from "./discord";
 import {
+  autocomplete,
   booleanOption,
   ephemeral,
   invokingDisplayName,
@@ -1418,6 +1423,9 @@ async function executeDiscordInteraction(
   env: Env,
 ): Promise<Response> {
   try {
+    if (interaction.type === InteractionType.ApplicationCommandAutocomplete) {
+      return (await handleShopAutocomplete(interaction, env)) ?? autocomplete([]);
+    }
     if (interaction.type === InteractionType.MessageComponent) {
       const journalResponse = await handlePlayerJournalInteraction(interaction, env);
       if (journalResponse !== null) return journalResponse;
@@ -1467,6 +1475,15 @@ async function executeDiscordInteraction(
     if (m6Response !== null) return m6Response;
     return ephemeral("I don't recognize that command yet.");
   } catch (error) {
+    if (interaction.type === InteractionType.ApplicationCommandAutocomplete) {
+      console.error(JSON.stringify({
+        kind: "guild-assistant.autocomplete-error",
+        interactionId: interaction.id,
+        command: interaction.data?.name,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      return autocomplete([]);
+    }
     if (error instanceof UserFacingError || error instanceof ReminderConfigurationError) {
       return ephemeral("⚠️ " + error.message);
     }
@@ -1573,6 +1590,7 @@ export async function handleDiscordInteraction(
     context !== undefined &&
     Boolean(interaction.token) &&
     interaction.type !== InteractionType.Ping &&
+    interaction.type !== InteractionType.ApplicationCommandAutocomplete &&
     !opensSummaryModal &&
     !opensJournalModal &&
     !(

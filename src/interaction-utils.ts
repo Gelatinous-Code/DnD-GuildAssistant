@@ -15,6 +15,11 @@ export interface CommandInvocation {
   options: ReadonlyMap<string, string | number | boolean>;
 }
 
+export interface FocusedOption {
+  name: string;
+  value: string;
+}
+
 export function parseCommand(interaction: DiscordInteraction): CommandInvocation {
   const command = interaction.data?.name ?? "";
   const topOptions = interaction.data?.options ?? [];
@@ -36,6 +41,32 @@ function collectValues(
       collectValues(option.options, values);
     }
   }
+}
+
+export function focusedOption(interaction: DiscordInteraction): FocusedOption | undefined {
+  return findFocusedOption(interaction.data?.options ?? []);
+}
+
+function findFocusedOption(
+  options: readonly DiscordInteractionOption[],
+): FocusedOption | undefined {
+  for (const option of options) {
+    if (option.focused && typeof option.value === "string") {
+      return { name: option.name, value: option.value };
+    }
+    const nested = findFocusedOption(option.options ?? []);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+export function autocomplete(
+  choices: readonly { name: string; value: string }[],
+): Response {
+  return Response.json({
+    type: InteractionResponseType.ApplicationCommandAutocompleteResult,
+    data: { choices: choices.slice(0, 25) },
+  });
 }
 
 export function stringOption(

@@ -11,6 +11,7 @@ function usage(message) {
     --guild <discord-guild-id> --actor <discord-user-id>
     [--expected-count 471] [--mapping-revision shop-v1]
     [--apply --remote|--local] [--out catalog-import.sql]
+    [--normalized-out catalog.normalized.json]
 
 Without --apply, the importer validates and previews the normalized catalog.
 Export an XLSX worksheet to UTF-8 CSV first; the source checksum is preserved.`);
@@ -25,7 +26,7 @@ function argumentsFrom(argv) {
     else if (value === "--apply") result.apply = true;
     else if (value === "--remote") result.remote = true;
     else if (value === "--local") result.local = true;
-    else if (["--guild", "--actor", "--expected-count", "--mapping-revision", "--out"].includes(value)) {
+    else if (["--guild", "--actor", "--expected-count", "--mapping-revision", "--out", "--normalized-out"].includes(value)) {
       result[value.slice(2).replaceAll("-", "_")] = argv[++index];
     } else if (value === "--help") usage();
     else usage(`Unknown argument: ${value}`);
@@ -114,8 +115,12 @@ function normalize(raw, index) {
   if (maxQuantity !== null && (!Number.isSafeInteger(maxQuantity) || maxQuantity < 1)) {
     throw new Error(`Row ${index + 2}: max quantity must be a positive whole number`);
   }
-  const tags = [...new Set(pick(row, "tags", "tag").split(/[,;|]/)
-    .map((tag) => tag.trim().toLowerCase()).filter(Boolean))];
+  const tags = [...new Set(
+    pick(row, "tags", "tag").split(/[,;|]/)
+      .map((tag) => tag.trim().toLowerCase())
+      .filter((tag) => tag && !/^\d+$/.test(tag)),
+  )];
+  if (/item proficiency/i.test(rawGold)) tags.push("item proficiency required");
   const levelText = pick(row, "level_tier", "level", "tier", "level_range");
   const explicitMinimum = pick(row, "minimum_level", "min_level");
   const explicitMaximum = pick(row, "maximum_level", "max_level");
@@ -139,14 +144,16 @@ function normalize(raw, index) {
   }
   const contractConsumable = truthy(pick(row, "contract_consumable", "contract_item")) ||
     /contract consumable/i.test(`${pick(row, "category", "type")} ${tags.join(" ")}`);
+  const attunement = pick(row, "requires_attunement", "attunement");
+  const rarity = pick(row, "rarity");
   return {
     itemId,
     name,
     source: pick(row, "source", "book", "source_book") || null,
     category: pick(row, "category", "type") || "Other",
-    description: pick(row, "description", "summary", "notes") || "No description supplied.",
-    rarity: pick(row, "rarity") || null,
-    requiresAttunement: truthy(pick(row, "requires_attunement", "attunement")),
+    description: pick(row, "description", "summary", "notes", "text") || "No description supplied.",
+    rarity: /^(none|n\/a)$/i.test(rarity) ? null : rarity || null,
+    requiresAttunement: truthy(attunement) || /requires?\s+attunement/i.test(attunement),
     damage: pick(row, "damage") || null,
     properties: pick(row, "properties", "property") || null,
     mastery: pick(row, "mastery") || null,
@@ -285,6 +292,9 @@ if (!Array.isArray(rawRows)) throw new Error("JSON input must be an array of ite
 const items = rawRows.map(normalize);
 const duplicate = items.find((item, index) => items.findIndex((other) => other.itemId === item.itemId) !== index);
 if (duplicate) throw new Error(`Duplicate stable item ID: ${duplicate.itemId}`);
+if (args.normalized_out) {
+  await writeFile(args.normalized_out, `${JSON.stringify(items, null, 2)}\n`, "utf8");
+}
 const expected = args.expected_count === undefined ? null : Number(args.expected_count);
 if (expected !== null && items.length !== expected) {
   throw new Error(`Expected ${expected} items but normalized ${items.length}`);

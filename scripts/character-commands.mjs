@@ -51,10 +51,10 @@ export const characterCommands = [
         description: "Approve a character and import its starting balances.",
         options: [
           characterIdOption,
-          { type: 4, name: "opening_xp", description: "Existing XP before automated tracking begins; defaults to 0.", min_value: 0 },
-          { type: 4, name: "opening_gold", description: "Existing gold before automated tracking begins; defaults to 0.", min_value: 0 },
           { type: 3, name: "reason", description: "Approval/import audit reason.", required: true, min_length: 3, max_length: 500 },
           { type: 5, name: "confirm", description: "Required: confirm approval and opening balances.", required: true },
+          { type: 4, name: "opening_xp", description: "Existing XP before automated tracking begins; defaults to 0.", min_value: 0 },
+          { type: 4, name: "opening_gold", description: "Existing gold before automated tracking begins; defaults to 0.", min_value: 0 },
         ],
       },
       {
