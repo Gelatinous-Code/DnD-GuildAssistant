@@ -1,0 +1,39 @@
+{
+  "contract": "shop-catalog.v1",
+  "guildId": "guild-fixture",
+  "catalogRevision": 7,
+  "lastUpdatedAt": 1788295200000,
+  "shopkeeper": {
+    "name": "The Quartermaster",
+    "welcomeMessage": "Mind the mimics, adventurer."
+  },
+  "items": [
+    {
+      "itemId": "guild-map",
+      "name": "Guild Trail Map",
+      "source": "Guild",
+      "category": "Adventuring Gear",
+      "description": "A weatherproof map of the guild's best-known roads and safe houses.",
+      "rarity": "Common",
+      "requiresAttunement": false,
+      "damage": null,
+      "properties": null,
+      "mastery": null,
+      "tags": ["free", "utility"],
+      "priceGold": 0,
+      "free": true,
+      "eligibility": "all",
+      "repeatRule": "once_per_character",
+      "maxQuantity": null,
+      "itemRevision": 2,
+      "discordHandoff": "/shop buy item_id:guild-map character_id:<your-character-id>",
+      "minimumLevel": 3,
+      "maximumLevel": 4,
+      "contractConsumable": false
+    }
+  ],
+  "page": {
+    "limit": 25,
+    "nextCursor": null
+  }
+}

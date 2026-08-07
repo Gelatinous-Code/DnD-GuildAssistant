@@ -1,0 +1,51 @@
+[
+  {
+    "item_id": "guild-map",
+    "name": "Guild Trail Map",
+    "source": "Guild",
+    "category": "Adventuring Gear",
+    "description": "A weatherproof map of the guild's best-known roads and safe houses.",
+    "rarity": "Common",
+    "tags": "free, utility",
+    "price_gold": 0,
+    "repeat_rule": "once_per_character",
+    "tier": "Tier 1"
+  },
+  {
+    "item_id": "healing-draught",
+    "name": "Healing Draught",
+    "source": "Guild Alchemist",
+    "category": "Consumables",
+    "description": "A ruby draught that helps an adventurer recover from a bruising expedition.",
+    "rarity": "Common",
+    "tags": "potion, healing, consumable",
+    "price_gold": 50,
+    "max_quantity": 5,
+    "contract_consumable": true
+  },
+  {
+    "item_id": "moon-blade",
+    "name": "Moon Blade",
+    "source": "Core",
+    "category": "Weapons",
+    "description": "A silvered blade whose edge gleams beneath moonlight.",
+    "rarity": "Uncommon",
+    "requires_attunement": true,
+    "damage": "1d8 slashing",
+    "properties": "versatile",
+    "mastery": "sap",
+    "tags": "weapon, silvered",
+    "price_gold": 125
+  },
+  {
+    "item_id": "infusion-kit",
+    "name": "Infusion Kit",
+    "source": "Guild Artificers",
+    "category": "Tools",
+    "description": "Specialized tools and reagents reserved for trained Artificers.",
+    "rarity": "Uncommon",
+    "tags": "tools, artificer",
+    "price_gold": 75,
+    "eligibility": "Artificer only"
+  }
+]

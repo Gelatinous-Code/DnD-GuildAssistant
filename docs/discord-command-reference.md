@@ -87,6 +87,12 @@ These require **Manage Server**.
 | `/progression-admin history` | Show one character's immutable ledger history. |
 | `/progression-admin season-preview` | Preview the character and balance totals that a rollover will close. |
 | `/progression-admin season-rollover` | Atomically close the current season and open zero balances for continuing approved characters. |
+| `/shop-admin item` | Create or replace a versioned guild shop item. |
+| `/shop-admin active` | Deactivate or restore an item without deleting history. |
+| `/shop-admin eligibility` | Record Artificer eligibility for one approved character. |
+| `/shop-admin reverse` | Reverse a receipt and append a compensating gold entry when paid. |
+| `/shop-admin configure` | Set shopkeeper text or maintenance mode. |
+| `/shop-admin status` | Show catalog revision and active item counts. |
 
 ## Character journals and progression
 
@@ -98,6 +104,10 @@ These commands return private responses unless they intentionally publish a jour
 | `/journal list` | Show your recent journal drafts and submissions. |
 | `/progression balance` | Show current level, XP, and gold for your approved characters. |
 | `/progression select` | Choose the character that played an ended session or receives a DM reward. |
+| `/shop browse` | Privately search the active guild shop catalog. |
+| `/shop characters` | List your active approved character IDs. |
+| `/shop buy` | Preview a purchase and choose whether to confirm it. |
+| `/shop history` | Show your immutable recent shop receipts. |
 
 Journal author edits close seven days after first submission. See [player character journals](player-journals.md). Seasonal rollover and historical corrections are covered in [progression seasons](progression-seasons.md).
 
