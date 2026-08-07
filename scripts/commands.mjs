@@ -2,6 +2,7 @@ import { m6Commands } from "./m6-commands.mjs";
 import { DISCORD_COMMAND_SCHEMA_VERSION } from "../src/command-schema-version.js";
 export { DISCORD_COMMAND_SCHEMA_VERSION };
 import { characterCommands } from "./character-commands.mjs";
+import { journalCommands } from "./journal-commands.mjs";
 import { progressionCommands } from "./progression-commands.mjs";
 import { recapCommands } from "./recap-commands.mjs";
 import { tableThreadCommands } from "./table-thread-commands.mjs";
@@ -535,6 +536,7 @@ export const commands = [
   },
   ...m6Commands,
   ...characterCommands,
+  ...journalCommands,
   ...progressionCommands,
   ...recapCommands,
   ...tableThreadCommands,

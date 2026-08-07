@@ -22,6 +22,19 @@ describe("progression command registration", () => {
     const adjust = admin.options.find((option: { name: string }) => option.name === "adjust");
     expect(adjust.options).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "reason", required: true }),
+      expect.objectContaining({ name: "season_id" }),
+      expect.objectContaining({ name: "confirm", required: true }),
+    ]));
+    expect(admin.options.map((option: { name: string }) => option.name)).toEqual([
+      "adjust",
+      "season-preview",
+      "season-rollover",
+      "history",
+      "target",
+    ]);
+    const rollover = admin.options.find((option: { name: string }) => option.name === "season-rollover");
+    expect(rollover.options).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "reason", required: true }),
       expect.objectContaining({ name: "confirm", required: true }),
     ]));
   });

@@ -6,6 +6,7 @@ import {
 } from "./discord";
 import { handleDiscordInteraction, handleScheduled } from "./app";
 import { handleWebsiteReadRequest } from "./website-read-model";
+import { handleWebsiteLibraryReadRequest } from "./website-library-read-model";
 
 const MAX_INTERACTION_BYTES = 1024 * 1024;
 
@@ -58,6 +59,8 @@ export async function handleRequest(
   context?: ExecutionContext,
 ): Promise<Response> {
   if (request.method === "GET") {
+    const libraryResponse = await handleWebsiteLibraryReadRequest(request, env);
+    if (libraryResponse !== null) return libraryResponse;
     const websiteResponse = await handleWebsiteReadRequest(request, env);
     if (websiteResponse !== null) return websiteResponse;
     return json({

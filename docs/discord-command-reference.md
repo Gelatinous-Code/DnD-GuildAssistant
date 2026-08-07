@@ -80,6 +80,26 @@ These require **Manage Server**.
 | `/table-thread-admin manage` | With confirmation and a reason, retry, recreate/redirect, or cancel a table-thread workflow. |
 | `/recap-admin status` | Inspect recap delivery, qualification, visibility, edit-lock, and audit state. |
 | `/recap-admin manage` | With confirmation and a reason, retry delivery, lock/reopen edits, hide/unhide, or append a public correction. |
+| `/journal-admin configure` | Set the Player Character Journals forum post/thread. |
+| `/journal-admin status` | Inspect journal publication configuration and an optional journal. |
+| `/journal-admin manage` | With a reason, hide/unhide or retry a journal publication. |
+| `/progression-admin adjust` | Append a confirmed current- or historical-season XP/gold correction. |
+| `/progression-admin history` | Show one character's immutable ledger history. |
+| `/progression-admin season-preview` | Preview the character and balance totals that a rollover will close. |
+| `/progression-admin season-rollover` | Atomically close the current season and open zero balances for continuing approved characters. |
+
+## Character journals and progression
+
+These commands return private responses unless they intentionally publish a journal copy.
+
+| Command | Purpose |
+| --- | --- |
+| `/journal write` | Open or edit one journal for an eligible completed session and approved character. |
+| `/journal list` | Show your recent journal drafts and submissions. |
+| `/progression balance` | Show current level, XP, and gold for your approved characters. |
+| `/progression select` | Choose the character that played an ended session or receives a DM reward. |
+
+Journal author edits close seven days after first submission. See [player character journals](player-journals.md). Seasonal rollover and historical corrections are covered in [progression seasons](progression-seasons.md).
 
 ## Optional notifications
 

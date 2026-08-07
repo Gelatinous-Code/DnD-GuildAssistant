@@ -35,7 +35,9 @@ If no selection is recorded, the member's main character is used. This preserves
 ## Administrator commands
 
 - `/progression-admin target` records a member's pre-synchronization character selection with a required reason.
-- `/progression-admin adjust` appends a signed XP and/or gold correction. The command requires a reason and confirmation and refuses to make the current balance negative.
+- `/progression-admin adjust` appends a signed XP and/or gold correction. The command requires a reason and confirmation and refuses to make the selected balance negative. Supply `season_id` only for a documented late correction to a historical season.
 - `/progression-admin history` privately displays recent awards, reversals, and adjustments.
 
 Correcting a completed session to cancelled—or replacing it with a new completion revision—automatically appends exact reversals for the prior revision. Retrying reconciliation cannot duplicate an award or reversal.
+
+Season reset policy, backup, recovery, and historical reads are documented in [progression seasons and rollover](progression-seasons.md).

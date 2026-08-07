@@ -10,6 +10,7 @@
     "commands:register": "node --env-file-if-exists=.dev.vars scripts/register-commands.mjs",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "history:import": "node scripts/import-session-history.mjs",
     "test": "vitest run --exclude \"test/integration/**\" --exclude \".wrangler/**\"",
     "test:watch": "vitest --exclude \"test/integration/**\" --exclude \".wrangler/**\"",
     "test:integration": "vitest run --config vitest.integration.config.ts",

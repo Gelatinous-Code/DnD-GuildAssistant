@@ -18,6 +18,7 @@ import {
   type GuildComponent,
   UserFacingError,
 } from "./interaction-utils";
+import { PlayerJournalService } from "./player-journal-service";
 import { PriorityDiagnosticsService } from "./priority-diagnostics";
 import { runPriorityNotificationMaintenance } from "./priority-maintenance";
 import { PriorityNotificationService } from "./priority-notification-service";
@@ -36,6 +37,7 @@ import { SessionSummaryService } from "./session-summary-service";
 import { TableThreadService } from "./table-thread-service";
 import { PriorityConfirmationRepository } from "./storage/priority-confirmation-repository";
 import { PriorityNotificationRepository } from "./storage/priority-notification-repository";
+import { PlayerJournalRepository } from "./storage/player-journal-repository";
 import { PriorityRepository } from "./storage/priority-repository";
 import {
   PrioritySeatingRepository,
@@ -708,6 +710,11 @@ export async function runM6Scheduled(env: Env, now = Date.now()): Promise<void> 
       operations: new SessionRecapOperationsRepository(env.DB),
     },
   ).runScheduled(50);
+  await new PlayerJournalService(
+    new PlayerJournalRepository(env.DB),
+    services.discord,
+    () => now,
+  ).deliverDue(50);
   await services.sessions.reconcilePendingRewards(50);
   await new WebsiteReadRepository(env.DB).deleteExpiredRateLimits(now, 1_000);
   const guilds = await env.DB

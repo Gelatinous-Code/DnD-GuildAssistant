@@ -213,6 +213,25 @@ export class CharacterRepository {
     const results = await this.db.batch([
       this.db
         .prepare(
+          `INSERT OR IGNORE INTO progression_seasons (
+             guild_id, season_id, name, status, starts_at,
+             created_by_user_id, created_at, updated_at
+           )
+           SELECT ?, 'legacy', 'Legacy / opening balances', 'current', 0, ?, ?, ?
+           WHERE NOT EXISTS (
+             SELECT 1 FROM progression_seasons
+             WHERE guild_id = ? AND status = 'current'
+           )`,
+        )
+        .bind(
+          input.guildId,
+          input.actorUserId,
+          input.occurredAt,
+          input.occurredAt,
+          input.guildId,
+        ),
+      this.db
+        .prepare(
           `UPDATE characters SET status = 'approved', progression_state = 'active',
              is_main = ?, opening_xp = ?, opening_gold = ?, version = ?,
              approved_at = ?, approved_by_user_id = ?, updated_at = ?
@@ -229,6 +248,36 @@ export class CharacterRepository {
           input.guildId,
           input.characterId,
           current.version,
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO character_season_openings (
+             opening_id, guild_id, season_id, character_id, opening_xp,
+             opening_gold, policy_version, source_kind, actor_user_id,
+             reason, idempotency_key, created_at
+           )
+           SELECT ?, ?, season_id, ?, ?, ?, 'progression-season-v1',
+                  'approval', ?, ?, ?, ?
+           FROM progression_seasons
+           WHERE guild_id = ? AND status = 'current'
+             AND EXISTS (
+               SELECT 1 FROM characters
+               WHERE guild_id = ? AND character_id = ? AND status = 'approved'
+             )`,
+        )
+        .bind(
+          `season-opening:approval:${input.characterId}`,
+          input.guildId,
+          input.characterId,
+          input.openingXp,
+          input.openingGold,
+          input.actorUserId,
+          input.reason,
+          `${input.idempotencyKey}:season-opening`,
+          input.occurredAt,
+          input.guildId,
+          input.guildId,
+          input.characterId,
         ),
       this.eventStatement({
         eventId: input.characterEventId,
@@ -247,7 +296,7 @@ export class CharacterRepository {
         occurredAt: input.occurredAt,
       }),
     ]);
-    if (results[0]?.meta.changes !== 1) return null;
+    if (results[1]?.meta.changes !== 1) return null;
     return this.get(input.guildId, input.characterId);
   }
 

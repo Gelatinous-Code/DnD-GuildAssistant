@@ -1,4 +1,9 @@
 import { handleCharacterCommand } from "./character-app";
+import {
+  handlePlayerJournalCommand,
+  handlePlayerJournalInteraction,
+} from "./player-journal-app";
+import { parseJournalCustomId } from "./player-journal-service";
 import { handleProgressionCommand } from "./progression-app";
 import { handleTableThreadCommand } from "./table-thread-app";
 import {
@@ -1410,11 +1415,15 @@ async function executeDiscordInteraction(
 ): Promise<Response> {
   try {
     if (interaction.type === InteractionType.MessageComponent) {
+      const journalResponse = await handlePlayerJournalInteraction(interaction, env);
+      if (journalResponse !== null) return journalResponse;
       const summaryResponse = await handleSessionSummaryInteraction(interaction, env);
       if (summaryResponse !== null) return summaryResponse;
       return await handleComponent(interaction, env);
     }
     if (interaction.type === InteractionType.ModalSubmit) {
+      const journalResponse = await handlePlayerJournalInteraction(interaction, env);
+      if (journalResponse !== null) return journalResponse;
       return (await handleSessionSummaryInteraction(interaction, env)) ??
         ephemeral("I don't recognize that form.");
     }
@@ -1438,6 +1447,8 @@ async function executeDiscordInteraction(
     if (command === "reminder") return await handleReminderCommand(interaction, env);
     const characterResponse = await handleCharacterCommand(interaction, env);
     if (characterResponse !== null) return characterResponse;
+    const journalResponse = await handlePlayerJournalCommand(interaction, env);
+    if (journalResponse !== null) return journalResponse;
     const progressionResponse = await handleProgressionCommand(interaction, env);
     if (progressionResponse !== null) return progressionResponse;
     const tableThreadResponse = await handleTableThreadCommand(interaction, env);
@@ -1547,11 +1558,15 @@ export async function handleDiscordInteraction(
   const opensSummaryModal =
     interaction.type === InteractionType.MessageComponent &&
     parseSummaryCustomId(interaction.data?.custom_id)?.action === "open";
+  const opensJournalModal =
+    interaction.type === InteractionType.MessageComponent &&
+    parseJournalCustomId(interaction.data?.custom_id)?.action === "open";
   const canDefer =
     context !== undefined &&
     Boolean(interaction.token) &&
     interaction.type !== InteractionType.Ping &&
     !opensSummaryModal &&
+    !opensJournalModal &&
     !(
       interaction.type === InteractionType.ApplicationCommand &&
       interaction.data?.name === "ping"
