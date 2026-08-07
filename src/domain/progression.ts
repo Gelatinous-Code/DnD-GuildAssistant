@@ -7,6 +7,16 @@ export interface LevelBand {
   goldPerGame: number;
 }
 
+export interface LevelProgress {
+  currentLevelMinimumXp: number;
+  nextLevel: number | null;
+  nextLevelMinimumXp: number | null;
+  xpIntoLevel: number;
+  xpRequiredForNextLevel: number | null;
+  xpRemaining: number | null;
+  isLevelCap: boolean;
+}
+
 export const LEVEL_BANDS: readonly LevelBand[] = [
   { level: 3, minimumXp: 0, maximumXp: 2, goldPerGame: 50 },
   { level: 4, minimumXp: 3, maximumXp: 6, goldPerGame: 100 },
@@ -23,6 +33,26 @@ export function levelForXp(xp: number): number {
     throw new RangeError("XP must be a non-negative whole number");
   }
   return [...LEVEL_BANDS].reverse().find((band) => xp >= band.minimumXp)!.level;
+}
+
+export function levelProgressForXp(xp: number): LevelProgress {
+  const level = levelForXp(xp);
+  const bandIndex = LEVEL_BANDS.findIndex((band) => band.level === level);
+  const band = LEVEL_BANDS[bandIndex]!;
+  const nextBand = LEVEL_BANDS[bandIndex + 1] ?? null;
+  const xpIntoLevel = xp - band.minimumXp;
+  const xpRequiredForNextLevel = nextBand === null
+    ? null
+    : nextBand.minimumXp - band.minimumXp;
+  return {
+    currentLevelMinimumXp: band.minimumXp,
+    nextLevel: nextBand?.level ?? null,
+    nextLevelMinimumXp: nextBand?.minimumXp ?? null,
+    xpIntoLevel,
+    xpRequiredForNextLevel,
+    xpRemaining: nextBand === null ? null : nextBand.minimumXp - xp,
+    isLevelCap: nextBand === null,
+  };
 }
 
 export function goldForXp(xp: number): number {

@@ -58,11 +58,18 @@ Authorization: Bearer <Discord OAuth token>
 
 The response is scoped to the verified Discord member and contains that
 member's own characters (including main, frozen, pending, revoked, and archived
-state), stored per-season balances, derived level, and append-only ledger
-history. Session awards include their completion revision, event/table source,
+state), stored per-season balances, derived level, provider-authored next-level
+threshold/progress, and append-only ledger history. Session awards include their completion revision, event/table source,
 participant role, and policy version. Adjustments and reversals retain their
 reason and effective/reversed state without exposing the administrator's
 Discord ID or internal idempotency keys.
+
+Each balance includes levelProgress, derived from the same authoritative policy
+used for awards. It reports the current level minimum, the next level and
+threshold, XP within the current level, XP required and remaining, and whether
+the character is at the level cap. At level 10 the next-level and remaining
+values are null; consumers must not copy level thresholds or invent a post-cap
+target.
 
 Use `limit` (1–50) and the opaque `cursor`/`nextCursor` pair for history.
 `character_id` may narrow the response only to a character owned by the verified

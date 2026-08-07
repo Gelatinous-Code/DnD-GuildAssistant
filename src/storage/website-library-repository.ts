@@ -1,4 +1,4 @@
-import { levelForXp } from "../domain/progression";
+import { levelForXp, levelProgressForXp } from "../domain/progression";
 
 export const WEBSITE_LIBRARY_CONTRACTS = {
   "player-journals": "player-journals.v1",
@@ -323,6 +323,7 @@ export class WebsiteLibraryRepository {
       xp: row.xp,
       gold: row.gold,
       level: levelForXp(row.xp),
+      levelProgress: levelProgressForXp(row.xp),
     }));
   }
 
