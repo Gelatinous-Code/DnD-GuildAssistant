@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seconddawnguild.com/contracts/website-read-models.v1.json",
+  "title": "Second Dawn Guild Assistant protected website read contracts",
+  "contractSetVersion": "website-read-models.v1",
+  "authentication": {
+    "scheme": "discord_oauth_bearer",
+    "discordScope": "guilds.members.read",
+    "reauthorizeEveryRequest": true,
+    "allowedRoles": ["guild_player", "administrator"],
+    "gmRoleAloneGrantsAccess": false
+  },
+  "privacy": {
+    "cacheControl": "private, no-store",
+    "vary": "Authorization",
+    "etag": "sha-256-base64url",
+    "guildScopeFromPath": true,
+    "directDatabaseAccessRequired": false
+  },
+  "rateLimit": {
+    "scope": ["guild_id", "discord_user_id"],
+    "requests": 120,
+    "windowSeconds": 60
+  },
+  "resources": {
+    "sessionSummaries": {
+      "path": "/api/v1/guilds/{guild_id}/session-summaries",
+      "version": "session-summaries.v1",
+      "visibility": "all verified members read visible records; administrators may request visibility=all",
+      "filters": {
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
+        "cursor": { "type": "opaque" },
+        "tier": { "enum": [1, 2, 3] },
+        "area": { "type": "string", "maxLength": 100 },
+        "visibility": { "enum": ["visible", "all"], "default": "visible" }
+      },
+      "itemFields": [
+        "summaryId", "sessionId", "eventId", "eventTitle", "sessionStartsAt",
+        "sessionEndsAt", "tableNumber", "tableTitle", "gameTier", "area",
+        "summary", "importantEvents", "bonusRewards", "otherNotes", "spoilers",
+        "source", "policy", "publicationStatus", "moderation", "corrections",
+        "firstSubmittedAt", "lastSubmittedAt", "revision"
+      ]
+    },
+    "playerJournals": {
+      "path": "/api/v1/guilds/{guild_id}/player-journals",
+      "version": "player-journals.v1",
+      "visibility": "all verified members read visible records; administrators may request visibility=all",
+      "filters": {
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
+        "cursor": { "type": "opaque" },
+        "character_id": { "type": "string", "maxLength": 200 },
+        "event_id": { "type": "string", "maxLength": 200 },
+        "visibility": { "enum": ["visible", "all"], "default": "visible" }
+      },
+      "itemFields": [
+        "journalId", "officialSummaryId", "sessionId", "eventId", "eventTitle",
+        "sessionEndsAt", "characterId", "characterName", "title", "journal",
+        "spoilers", "source", "publicationStatus", "moderation", "firstSubmittedAt",
+        "lastSubmittedAt", "revision"
+      ]
+    },
+    "historicalSummaries": {
+      "path": "/api/v1/guilds/{guild_id}/historical-summaries",
+      "version": "historical-summaries.v1",
+      "visibility": "all verified members read published import batches",
+      "filters": {
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
+        "cursor": { "type": "opaque" },
+        "season": { "type": "string", "maxLength": 80 }
+      }
+    },
+    "memberProgression": {
+      "path": "/api/v1/guilds/{guild_id}/progression-seasons",
+      "version": "progression-seasons.v1",
+      "visibility": "verified member's own records only",
+      "filters": {
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
+        "cursor": { "type": "opaque" },
+        "season": { "type": "string", "maxLength": 80, "specialValues": ["current", "all"] },
+        "character_id": { "type": "string", "maxLength": 200, "mustBeOwned": true }
+      },
+      "responseFields": [
+        "viewer", "selectedSeason", "selectedCharacterId", "seasons", "characters",
+        "balances", "history", "nextCursor"
+      ],
+      "characterFields": [
+        "characterId", "name", "sheetUrl", "legacySeasonLabel", "status",
+        "progressionState", "isMain", "revision", "createdAt", "updatedAt"
+      ],
+      "balanceFields": [
+        "seasonId", "seasonName", "seasonStatus", "characterId", "xp", "gold", "level"
+      ],
+      "historyFields": [
+        "entryId", "characterId", "characterName", "rewardCharacterId", "seasonId", "kind", "xpDelta",
+        "goldDelta", "source", "policyVersion", "preAward", "reversesEntryId",
+        "reason", "effective", "reversal", "occurredAt"
+      ]
+    }
+  },
+  "stableErrors": [
+    "method_not_allowed", "unsupported_contract_version", "discord_oauth_required",
+    "guild_not_found", "website_role_not_configured", "membership_verification_unavailable",
+    "not_a_current_guild_member", "guild_player_role_required", "administrator_role_required",
+    "rate_limited", "limit_must_be_between_1_and_50", "cursor is invalid",
+    "season_not_found", "character_not_found"
+  ],
+  "excludedFields": [
+    "discord_access_token", "discord_interaction_token", "configured_role_ids",
+    "admin_actor_user_id", "idempotency_key", "private_audit_details", "delivery_errors"
+  ]
+}

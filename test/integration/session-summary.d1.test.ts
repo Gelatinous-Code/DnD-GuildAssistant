@@ -21,6 +21,7 @@ describe("D1 session summary workflow", () => {
       BigInt(`0x${prefix.replaceAll("-", "").slice(0, 15)}`) + 100000000000000000n
     ).toString();
     const roleId = (BigInt(guildId) + 1n).toString();
+    const adminRoleId = (BigInt(guildId) + 2n).toString();
     const eventId = `${prefix}:event`;
     const planId = `${prefix}:plan`;
     const tableId = `${prefix}:table`;
@@ -31,8 +32,8 @@ describe("D1 session summary workflow", () => {
 
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO guild_config (guild_id, reminder_role_id) VALUES (?, ?)",
-      ).bind(guildId, roleId),
+        "INSERT INTO guild_config (guild_id, reminder_role_id, admin_role_id) VALUES (?, ?, ?)",
+      ).bind(guildId, roleId, adminRoleId),
       env.DB.prepare(
         `INSERT INTO weekly_events (
            event_id, guild_id, title, starts_at, ends_at, signup_opens_at,
@@ -209,6 +210,24 @@ describe("D1 session summary workflow", () => {
         },
       },
     );
+    const readAdminSummaryFeed = () => handleWebsiteReadRequest(
+      new Request(
+        `https://guild.example/api/v1/guilds/${guildId}/session-summaries?visibility=all`,
+        { headers: {
+          Authorization: "Bearer admin-token",
+          "X-Guild-Contract-Version": "session-summaries.v1",
+        } },
+      ),
+      env,
+      {
+        now: () => now,
+        fetch: async () => Response.json({
+          user: { id: `${prefix}:admin-reader` },
+          roles: [adminRoleId],
+          pending: false,
+        }),
+      },
+    );
     const feedResponse = await readSummaryFeed();
     expect(feedResponse?.status).toBe(200);
     expect(feedResponse?.headers.get("cache-control")).toBe("private, no-store");
@@ -293,6 +312,15 @@ describe("D1 session summary workflow", () => {
     });
     const hiddenFeed = await (await readSummaryFeed())!.json() as { items: unknown[] };
     expect(hiddenFeed.items).toHaveLength(0);
+    const hiddenAdminFeed = await (await readAdminSummaryFeed())!.json() as {
+      viewer: { capabilities: { readModerationDiagnostics: boolean } };
+      items: Array<{ publicationStatus: string; moderation: { reason: string } }>;
+    };
+    expect(hiddenAdminFeed.viewer.capabilities.readModerationDiagnostics).toBe(true);
+    expect(hiddenAdminFeed.items[0]).toMatchObject({
+      publicationStatus: "hidden",
+      moderation: { reason: "Hide while a correction is prepared" },
+    });
     await operations.manage({
       guildId,
       eventId,
@@ -323,6 +351,13 @@ describe("D1 session summary workflow", () => {
     expect(correctedFeed.items[0]?.corrections).toEqual([
       { text: "Correction: the gate was stabilized, not permanently sealed.", correctedAt: now },
     ]);
+    const adminCorrectedFeed = await (await readAdminSummaryFeed())!.json() as {
+      items: Array<{ corrections: Array<{ provenance: { eventId: string; reason: string } }> }>;
+    };
+    expect(adminCorrectedFeed.items[0]?.corrections[0]?.provenance).toMatchObject({
+      eventId: expect.any(String),
+      reason: "Correct an inaccurate public detail",
+    });
 
     now = first.summary.editExpiresAt! + 1;
     await expect(summaries.getForDm(summaryId, dmUserId)).rejects.toThrow(

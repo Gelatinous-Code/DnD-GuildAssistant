@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "progression-seasons.v1",
+  "guildId": "100000000000000001",
+  "viewer": {
+    "userId": "100000000000000002",
+    "roles": ["guild_player"],
+    "capabilities": {
+      "readVisibleLibrary": true,
+      "readOwnProgression": true,
+      "readModerationDiagnostics": false
+    }
+  },
+  "generatedAt": 1789495200000,
+  "selectedSeason": "current",
+  "selectedCharacterId": null,
+  "seasons": [
+    {
+      "seasonId": "season-6",
+      "name": "Season 6",
+      "status": "current",
+      "startsAt": 1789495200000,
+      "endedAt": null,
+      "revision": 0
+    }
+  ],
+  "characters": [
+    {
+      "characterId": "character-main",
+      "name": "Sample Hero",
+      "sheetUrl": null,
+      "legacySeasonLabel": null,
+      "status": "approved",
+      "progressionState": "active",
+      "isMain": true,
+      "revision": 1,
+      "createdAt": 1789495200000,
+      "updatedAt": 1789495200000
+    }
+  ],
+  "balances": [
+    {
+      "seasonId": "season-6",
+      "seasonName": "Season 6",
+      "seasonStatus": "current",
+      "characterId": "character-main",
+      "xp": 4,
+      "gold": 150,
+      "level": 4
+    }
+  ],
+  "history": [],
+  "nextCursor": null
+}
