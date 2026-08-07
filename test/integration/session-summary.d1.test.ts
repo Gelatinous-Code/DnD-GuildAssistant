@@ -233,7 +233,13 @@ describe("D1 session summary workflow", () => {
     expect(feedResponse?.headers.get("cache-control")).toBe("private, no-store");
     const feed = await feedResponse!.json() as {
       schemaVersion: string;
-      items: Array<{ summary: string; area: string; gameTier: number }>;
+      items: Array<{
+        summary: string;
+        area: string;
+        gameTier: number;
+        gmName: string | null;
+        seasonName: string | null;
+      }>;
     };
     expect(feed).toMatchObject({
       schemaVersion: "session-summaries.v1",
@@ -241,6 +247,8 @@ describe("D1 session summary workflow", () => {
         summary: "The party stopped the ritual and rescued the missing scouts.",
         area: "Bloom",
         gameTier: 2,
+        gmName: "Summary DM",
+        seasonName: null,
       }],
     });
     const validator = feedResponse!.headers.get("etag");
