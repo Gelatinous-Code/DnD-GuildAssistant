@@ -5,6 +5,7 @@ import { characterCommands } from "./character-commands.mjs";
 import { journalCommands } from "./journal-commands.mjs";
 import { progressionCommands } from "./progression-commands.mjs";
 import { recapCommands } from "./recap-commands.mjs";
+import { shopCommands } from "./shop-commands.mjs";
 import { tableThreadCommands } from "./table-thread-commands.mjs";
 
 // MVP destinations are normal text and announcement channels. Threads and
@@ -539,5 +540,6 @@ export const commands = [
   ...journalCommands,
   ...progressionCommands,
   ...recapCommands,
+  ...shopCommands,
   ...tableThreadCommands,
 ];

@@ -11,6 +11,8 @@
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "history:import": "node scripts/import-session-history.mjs",
+    "shop:import": "node scripts/import-shop-catalog.mjs",
+    "shop:export": "node scripts/export-shop-catalog.mjs",
     "test": "vitest run --exclude \"test/integration/**\" --exclude \".wrangler/**\"",
     "test:watch": "vitest --exclude \"test/integration/**\" --exclude \".wrangler/**\"",
     "test:integration": "vitest run --config vitest.integration.config.ts",

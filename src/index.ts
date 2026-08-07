@@ -5,6 +5,7 @@ import {
   type DiscordInteraction,
 } from "./discord";
 import { handleDiscordInteraction, handleScheduled } from "./app";
+import { handleShopPublicApi } from "./shop-public-api";
 import { handleWebsiteReadRequest } from "./website-read-model";
 import { handleWebsiteLibraryReadRequest } from "./website-library-read-model";
 
@@ -59,6 +60,8 @@ export async function handleRequest(
   context?: ExecutionContext,
 ): Promise<Response> {
   if (request.method === "GET") {
+    const catalogResponse = await handleShopPublicApi(request, env);
+    if (catalogResponse !== null) return catalogResponse;
     const libraryResponse = await handleWebsiteLibraryReadRequest(request, env);
     if (libraryResponse !== null) return libraryResponse;
     const websiteResponse = await handleWebsiteReadRequest(request, env);

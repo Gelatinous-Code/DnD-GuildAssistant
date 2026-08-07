@@ -5,6 +5,8 @@ import {
 } from "./player-journal-app";
 import { parseJournalCustomId } from "./player-journal-service";
 import { handleProgressionCommand } from "./progression-app";
+import { handleShopCommand, handleShopInteraction } from "./shop-app";
+import { ShopService } from "./shop-service";
 import { handleTableThreadCommand } from "./table-thread-app";
 import {
   handleSessionSummaryCommand,
@@ -303,6 +305,8 @@ function helpContent(interaction: DiscordInteraction): string {
     "",
     "**Leave Table** clears only your table choice; you are still signed up for the week.",
     "**Withdraw** drops you from the whole week and may promote the next waiting player.",
+    "",
+    "Browse guild gear privately with `/shop browse`; `/shop characters` lists the approved character IDs you can use to buy.",
     "",
     "Use the newest bot message if an old button is rejected. Choose another `/help` topic for GMing, priority tokens, or organizing.",
   ].join("\n");
@@ -1419,6 +1423,8 @@ async function executeDiscordInteraction(
       if (journalResponse !== null) return journalResponse;
       const summaryResponse = await handleSessionSummaryInteraction(interaction, env);
       if (summaryResponse !== null) return summaryResponse;
+      const shopResponse = await handleShopInteraction(interaction, env);
+      if (shopResponse !== null) return shopResponse;
       return await handleComponent(interaction, env);
     }
     if (interaction.type === InteractionType.ModalSubmit) {
@@ -1451,6 +1457,8 @@ async function executeDiscordInteraction(
     if (journalResponse !== null) return journalResponse;
     const progressionResponse = await handleProgressionCommand(interaction, env);
     if (progressionResponse !== null) return progressionResponse;
+    const shopResponse = await handleShopCommand(interaction, env);
+    if (shopResponse !== null) return shopResponse;
     const tableThreadResponse = await handleTableThreadCommand(interaction, env);
     if (tableThreadResponse !== null) return tableThreadResponse;
     const summaryResponse = await handleSessionSummaryCommand(interaction, env);
@@ -1636,5 +1644,6 @@ export async function handleScheduled(env: Env, now = Date.now()): Promise<void>
   await Promise.all([
     rosterNotifications.deliverDue(now),
     runM6Scheduled(env, now),
+    new ShopService(env.DB).purgeExpired(now),
   ]);
 }

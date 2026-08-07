@@ -5,7 +5,7 @@ import {
 } from "../src/app";
 
 it("renders the Worker command-schema version for guild doctor", () => {
-  expect(commandSchemaVersionLine()).toMatch(/Discord command schema.*2026\.08\.06\.3/);
+  expect(commandSchemaVersionLine()).toMatch(/Discord command schema.*2026\.08\.06\.4/);
 });
 
 const env = {
