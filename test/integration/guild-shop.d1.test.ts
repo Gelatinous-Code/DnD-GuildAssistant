@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { handleShopAutocomplete, handleShopCommand } from "../../src/shop-app";
 import { handleShopPublicApi } from "../../src/shop-public-api";
 import { ShopRuleError, ShopService } from "../../src/shop-service";
 
@@ -49,13 +50,15 @@ async function addItem(input: {
   minimumLevel?: number;
   maximumLevel?: number;
   contractConsumable?: boolean;
+  name?: string;
+  description?: string;
 }) {
   return input.shop.upsertItem({
     guildId: input.guildId,
     itemId: input.itemId,
-    name: input.itemId.replaceAll("-", " "),
+    name: input.name ?? input.itemId.replaceAll("-", " "),
     category: "Wonders",
-    description: `A fine ${input.itemId}`,
+    description: input.description ?? `A fine ${input.itemId}`,
     priceGold: input.priceGold,
     eligibility: input.eligibility,
     repeatRule: input.repeatRule,
@@ -244,6 +247,114 @@ describe("D1 guild shop", () => {
       maximum_level: 6,
       contract_consumable: 1,
     });
+  });
+
+  it("ranks item-name matches ahead of description matches and resolves typed names", async () => {
+    const f = await fixture();
+    await addItem({
+      ...f,
+      itemId: "club",
+      name: "Club",
+      description: "Sometimes compared with a sword by an optimistic merchant.",
+      priceGold: 0,
+    });
+    await addItem({
+      ...f,
+      itemId: "dancing-sword",
+      name: "Dancing Sword",
+      priceGold: 1200,
+    });
+    await addItem({
+      ...f,
+      itemId: "sword-cane",
+      name: "Sword Cane",
+      priceGold: 25,
+    });
+
+    const matches = await f.shop.listCatalog({
+      guildId: f.guildId,
+      query: "sword",
+      limit: 5,
+      sort: "relevance",
+    });
+    expect(matches.map((item) => item.itemId)).toEqual([
+      "sword-cane",
+      "dancing-sword",
+      "club",
+    ]);
+    await expect(f.shop.resolveItemId(f.guildId, "Sword Cane"))
+      .resolves.toBe("sword-cane");
+    await expect(f.shop.resolveOwnedCharacterId(f.guildId, f.userId, "Mara"))
+      .resolves.toBe(f.characterId);
+  });
+
+  it("returns readable Discord autocomplete choices and a compact browse response", async () => {
+    const f = await fixture();
+    await addItem({
+      ...f,
+      itemId: "sword-cane",
+      name: "Sword Cane",
+      description: "A very long merchant description ".repeat(8),
+      priceGold: 25,
+    });
+
+    const itemResponse = await handleShopAutocomplete({
+      type: 4,
+      guild_id: f.guildId,
+      member: { user: { id: f.userId } },
+      data: {
+        name: "shop",
+        options: [{
+          type: 1,
+          name: "buy",
+          options: [{ type: 3, name: "item_id", value: "sword", focused: true }],
+        }],
+      },
+    }, env);
+    expect(await itemResponse!.json()).toEqual({
+      type: 8,
+      data: { choices: [{ name: "Sword Cane — 25 gp", value: "sword-cane" }] },
+    });
+
+    const characterResponse = await handleShopAutocomplete({
+      type: 4,
+      guild_id: f.guildId,
+      member: { user: { id: f.userId } },
+      data: {
+        name: "shop",
+        options: [{
+          type: 1,
+          name: "buy",
+          options: [{ type: 3, name: "character_id", value: "mar", focused: true }],
+        }],
+      },
+    }, env);
+    expect(await characterResponse!.json()).toEqual({
+      type: 8,
+      data: { choices: [{ name: "Mara — main", value: f.characterId }] },
+    });
+
+    const browseResponse = await handleShopCommand({
+      type: 2,
+      guild_id: f.guildId,
+      member: { user: { id: f.userId } },
+      data: {
+        name: "shop",
+        options: [{
+          type: 1,
+          name: "browse",
+          options: [{ type: 3, name: "query", value: "sword" }],
+        }],
+      },
+    }, env);
+    const browseBody = await browseResponse!.json() as {
+      data: { content: string };
+    };
+    expect(browseBody.data.content).toContain("**Sword Cane** — 25 gp");
+    expect(browseBody.data.content).not.toContain("sword-cane");
+    expect(browseBody.data.content).toContain("start typing an item and character name");
+    expect(browseBody.data.content.split("• **")).toHaveLength(2);
+    expect(browseBody.data.content).toContain("…");
   });
 
   it("enforces Artificer eligibility and publishes a bounded anonymous contract", async () => {

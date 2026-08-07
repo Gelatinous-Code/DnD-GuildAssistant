@@ -6,10 +6,12 @@ real money, inventory, or physical fulfillment.
 
 ## Player flow
 
-1. `/shop browse` searches active items by text, category, tag, or free/paid status.
-2. `/shop characters` privately lists the player's approved, active character IDs.
-3. `/shop buy item_id:<id> character_id:<id> quantity:<n>` creates a ten-minute,
-   server-side preview. No client-supplied price is trusted.
+1. `/shop browse` searches active items by text, category, tag, or free/paid status
+   and shows up to five relevance-ranked matches.
+2. `/shop characters` privately lists the player's approved, active character names.
+3. `/shop buy` provides Discord autocomplete for item and character names. Exact
+   typed names also work; stable IDs remain internal command values. The command creates
+   a ten-minute server-side preview, and no client-supplied price is trusted.
 4. **Seal the bargain** rechecks ownership, character status, catalog/item revisions,
    eligibility, repeat rules, quantity, live gold, and the character's ledger revision.
 5. A successful confirmation returns an immutable receipt. Repeated clicks and
@@ -48,30 +50,46 @@ revision. Stable item IDs make rerunning the same checksum and mapping revision
 idempotent. Items absent from a later replacement import are deactivated, not
 deleted.
 
-Validate the source before touching D1:
+The reviewed Season 4 source and its mechanically extracted import are preserved
+under [`catalogs/2026-s4`](../catalogs/2026-s4). The provenance manifest records
+the original XLSX checksum, source worksheet/range, extracted JSON checksum,
+mapping revision, import batch ID, and reconciliation totals.
+
+Validate the real source before touching D1 and retain the normalized output for
+review:
 
 ```text
-npm run shop:import -- catalog.csv --guild <guild-id> --actor <admin-id> --expected-count 471
+npm run shop:import -- catalogs/2026-s4/guild-shop-2026-s4.json --guild <guild-id> --actor <admin-id> --expected-count 471 --mapping-revision shop-catalog-2026-s4-v2 --normalized-out catalog.normalized.json
 ```
 
-The initial production source is expected to reconcile to 471 rows: 168 free,
-296 with numeric gold prices, and 7 Artificer-only. The importer reports normalized
-free, paid, and restricted counts before applying. Investigate any mismatch before
-continuing.
+The reviewed source reconciles to 471 rows: 168 free, 296 with numeric gold prices,
+and 7 Artificer-only. Stored values contain 175 zero-gold items because the seven
+Artificer-only entries are also free, 175 attunement-required items, and 78 free
+items that retain an `item proficiency required` tag. All 471 descriptions and
+stable item IDs are present. Investigate any mismatch before continuing.
 
 Apply to local D1 first, then remote D1:
 
 ```text
-npm run shop:import -- catalog.csv --guild <guild-id> --actor <admin-id> --expected-count 471 --apply --local
-npm run shop:import -- catalog.csv --guild <guild-id> --actor <admin-id> --expected-count 471 --apply --remote
+npm run shop:import -- catalogs/2026-s4/guild-shop-2026-s4.json --guild <guild-id> --actor <admin-id> --expected-count 471 --mapping-revision shop-catalog-2026-s4-v2 --apply --local
+npm run shop:import -- catalogs/2026-s4/guild-shop-2026-s4.json --guild <guild-id> --actor <admin-id> --expected-count 471 --mapping-revision shop-catalog-2026-s4-v2 --apply --remote
 ```
+
+The isolated local D1 proof applied the import and replayed the same batch with
+catalog revision 1, 471 active/stored items, zero deactivations, and 471 item
+revisions after replay. This proves the same checksum and mapping revision are
+idempotent. The remote run must use the Discord ID of the administrator performing
+the import as `<admin-id>`.
 
 Supported headers include `item_id`, `name`, `source`, `category`, `description`,
 `rarity`, `requires_attunement`, `damage`, `properties`, `mastery`, `tags`,
 `price_gold`, `free`, `eligibility`, `repeat_rule`, `max_quantity`, `level_tier`,
 `minimum_level`, `maximum_level`, `contract_consumable`, and `active`.
-Common aliases such as `item`, `gold`, `cost`, `book`, and `type` are normalized.
-Ambiguous prices fail closed. Export XLSX worksheets to CSV so the mapping remains
+Common aliases such as `item`, `gold`, `cost`, `book`, `type`, and the workbook's
+`text` description column are normalized. Human-readable attunement phrases are
+preserved as the attunement flag, numeric workbook sort tags are omitted, and the
+free-with-proficiency price class gains an explicit restriction tag. Ambiguous
+prices fail closed. Export XLSX worksheets to JSON or CSV so the mapping remains
 explicit and reviewable.
 
 Export the complete current catalog, including inactive items and item/catalog

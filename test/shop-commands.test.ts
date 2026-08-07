@@ -10,9 +10,15 @@ describe("guild shop command registration", () => {
     expect(shop.options.map((entry: { name: string }) => entry.name)).toEqual([
       "browse", "buy", "history", "characters",
     ]);
-    expect(shop.options.find((entry: { name: string }) => entry.name === "buy")
-      .options.filter((entry: { required?: boolean }) => entry.required)
+    const buy = shop.options.find((entry: { name: string }) => entry.name === "buy");
+    expect(buy.options.filter((entry: { required?: boolean }) => entry.required)
       .map((entry: { name: string }) => entry.name)).toEqual(["item_id", "character_id"]);
+    expect(buy.options.filter((entry: { autocomplete?: boolean }) => entry.autocomplete)
+      .map((entry: { name: string }) => entry.name)).toEqual([
+        "item_id", "character_id", "item_id_2",
+      ]);
+    const history = shop.options.find((entry: { name: string }) => entry.name === "history");
+    expect(history.options[0]).toMatchObject({ name: "character_id", autocomplete: true });
   });
 
   it("keeps all mutation and correction controls admin-only", () => {
@@ -21,5 +27,11 @@ describe("guild shop command registration", () => {
     expect(admin.options.map((entry: { name: string }) => entry.name)).toEqual([
       "item", "active", "eligibility", "reverse", "configure", "status",
     ]);
+    for (const subcommandName of ["item", "active", "eligibility"]) {
+      const subcommand = admin.options.find(
+        (entry: { name: string }) => entry.name === subcommandName,
+      );
+      expect(subcommand.options[0].autocomplete).toBe(true);
+    }
   });
 });

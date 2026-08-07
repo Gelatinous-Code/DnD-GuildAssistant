@@ -48,6 +48,13 @@ export interface ShopReceipt {
   purchasedAt: number;
 }
 
+export interface ShopCharacterChoice {
+  characterId: string;
+  name: string;
+  ownerUserId: string;
+  isMain: boolean;
+}
+
 export interface ShopPreview {
   previewId: string;
   guildId: string;
@@ -237,14 +244,28 @@ export class ShopService {
     includeInactive?: boolean;
     afterItemId?: string;
     limit?: number;
+    sort?: "item_id" | "name" | "relevance";
   }): Promise<ShopCatalogItem[]> {
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 101);
     const query = input.query?.trim().toLowerCase();
+    const relevanceOrder = input.sort === "relevance" && query
+      ? `CASE
+           WHEN lower(name) = ? OR lower(item_id) = ? THEN 0
+           WHEN lower(name) LIKE ? THEN 1
+           WHEN lower(name) LIKE ? OR lower(item_id) LIKE ? THEN 2
+           ELSE 3
+         END, lower(name), item_id`
+      : input.sort === "name"
+      ? "lower(name), item_id"
+      : "item_id";
+    const rankingBindings = input.sort === "relevance" && query
+      ? [query, query, `${query}%`, `%${query}%`, `%${query}%`]
+      : [];
     const result = await this.db.prepare(
       `SELECT * FROM shop_catalog_items
        WHERE guild_id = ?
          AND (? = 1 OR active = 1)
-         AND (? IS NULL OR lower(name) LIKE ? OR lower(description) LIKE ?)
+         AND (? IS NULL OR lower(name) LIKE ? OR lower(item_id) LIKE ? OR lower(description) LIKE ?)
          AND (? IS NULL OR lower(category) = lower(?))
          AND (? IS NULL OR EXISTS (
            SELECT 1 FROM json_each(tags_json) WHERE lower(value) = lower(?)
@@ -252,11 +273,12 @@ export class ShopService {
          AND (? IS NULL OR eligibility = ?)
          AND (? IS NULL OR (price_gold = 0) = ?)
          AND item_id > ?
-       ORDER BY item_id LIMIT ?`,
+       ORDER BY ${relevanceOrder} LIMIT ?`,
     ).bind(
       input.guildId,
       input.includeInactive ? 1 : 0,
       query ?? null,
+      query ? `%${query}%` : null,
       query ? `%${query}%` : null,
       query ? `%${query}%` : null,
       input.category?.trim() || null,
@@ -268,10 +290,130 @@ export class ShopService {
       input.free === undefined ? null : 1,
       input.free ? 1 : 0,
       input.afterItemId ?? "",
+      ...rankingBindings,
       limit,
     ).all<ItemRow>();
     return result.results.map(itemFromRow);
   }
+  async resolveItemId(
+    guildId: string,
+    reference: string,
+    includeInactive = false,
+  ): Promise<string> {
+    const value = reference.trim();
+    const result = await this.db.prepare(
+      `SELECT item_id FROM shop_catalog_items
+       WHERE guild_id=? AND (?=1 OR active=1)
+         AND (lower(item_id)=lower(?) OR lower(name)=lower(?))
+       ORDER BY CASE WHEN lower(item_id)=lower(?) THEN 0 ELSE 1 END, item_id
+       LIMIT 2`,
+    ).bind(guildId, includeInactive ? 1 : 0, value, value, value).all<{ item_id: string }>();
+    const matches = result.results;
+    if (!matches.length) {
+      throw new ShopRuleError(
+        `No ${includeInactive ? "catalog" : "available"} item matches "${value}". Start typing the item name and select a suggestion.`,
+      );
+    }
+    if (matches[0]!.item_id.toLowerCase() === value.toLowerCase()) return matches[0]!.item_id;
+    if (matches.length > 1) {
+      throw new ShopRuleError(
+        `Several items are named "${value}". Select the exact item from Discord's suggestions.`,
+      );
+    }
+    return matches[0]!.item_id;
+  }
+
+  async resolveOwnedCharacterId(
+    guildId: string,
+    userId: string,
+    reference: string,
+  ): Promise<string> {
+    const value = reference.trim().toLowerCase();
+    const matches = (await this.approvedCharacters(guildId, userId)).filter((character) =>
+      character.characterId.toLowerCase() === value || character.name.toLowerCase() === value
+    );
+    const exactId = matches.find((character) => character.characterId.toLowerCase() === value);
+    if (exactId) return exactId.characterId;
+    if (!matches.length) {
+      throw new ShopRuleError(
+        `No active approved character matches "${reference.trim()}". Start typing the character name and select a suggestion.`,
+      );
+    }
+    if (matches.length > 1) {
+      throw new ShopRuleError(
+        `Several of your characters are named "${reference.trim()}". Select the exact character from Discord's suggestions.`,
+      );
+    }
+    return matches[0]!.characterId;
+  }
+
+  async resolveGuildCharacterId(guildId: string, reference: string): Promise<string> {
+    const value = reference.trim();
+    const result = await this.db.prepare(
+      `SELECT character_id FROM characters
+       WHERE guild_id=? AND status='approved'
+         AND (lower(character_id)=lower(?) OR lower(name)=lower(?))
+       ORDER BY CASE WHEN lower(character_id)=lower(?) THEN 0 ELSE 1 END, character_id
+       LIMIT 2`,
+    ).bind(guildId, value, value, value).all<{ character_id: string }>();
+    const matches = result.results;
+    if (!matches.length) {
+      throw new ShopRuleError(
+        `No approved character matches "${value}". Start typing the character name and select a suggestion.`,
+      );
+    }
+    if (matches[0]!.character_id.toLowerCase() === value.toLowerCase()) {
+      return matches[0]!.character_id;
+    }
+    if (matches.length > 1) {
+      throw new ShopRuleError(
+        `Several characters are named "${value}". Select the exact character from Discord's suggestions.`,
+      );
+    }
+    return matches[0]!.character_id;
+  }
+
+  async searchApprovedCharacters(
+    guildId: string,
+    query?: string,
+    limit = 20,
+  ): Promise<ShopCharacterChoice[]> {
+    const value = query?.trim().toLowerCase();
+    const boundedLimit = Math.min(Math.max(limit, 1), 25);
+    const result = await this.db.prepare(
+      `SELECT character_id, name, owner_user_id, is_main FROM characters
+       WHERE guild_id=? AND status='approved'
+         AND (? IS NULL OR lower(name) LIKE ? OR lower(character_id) LIKE ?)
+       ORDER BY CASE
+         WHEN ? IS NOT NULL AND lower(name)=? THEN 0
+         WHEN ? IS NOT NULL AND lower(name) LIKE ? THEN 1
+         ELSE 2
+       END, is_main DESC, lower(name), character_id
+       LIMIT ?`,
+    ).bind(
+      guildId,
+      value ?? null,
+      value ? `%${value}%` : null,
+      value ? `%${value}%` : null,
+      value ?? null,
+      value ?? null,
+      value ?? null,
+      value ? `${value}%` : null,
+      boundedLimit,
+    ).all<{
+      character_id: string;
+      name: string;
+      owner_user_id: string;
+      is_main: number;
+    }>();
+    return result.results.map((row) => ({
+      characterId: row.character_id,
+      name: row.name,
+      ownerUserId: row.owner_user_id,
+      isMain: row.is_main === 1,
+    }));
+  }
+
   async catalogCounts(guildId: string): Promise<{ total: number; active: number }> {
     const row = await this.db.prepare(
       `SELECT count(*) AS total,

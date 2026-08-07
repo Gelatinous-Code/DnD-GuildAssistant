@@ -50,11 +50,11 @@ export const progressionCommands = [
         description: "Append a reasoned XP and/or gold adjustment.",
         options: [
           characterId,
+          { type: 3, name: "reason", description: "Required audit reason.", required: true, min_length: 3, max_length: 500 },
+          { type: 5, name: "confirm", description: "Required: append this immutable adjustment.", required: true },
           { type: 4, name: "xp_delta", description: "Signed XP change; omit for zero.", min_value: -1000000, max_value: 1000000 },
           { type: 4, name: "gold_delta", description: "Signed gold change; omit for zero.", min_value: -100000000, max_value: 100000000 },
           { type: 3, name: "season_id", description: "Optional historical season to correct.", min_length: 1, max_length: 80 },
-          { type: 3, name: "reason", description: "Required audit reason.", required: true, min_length: 3, max_length: 500 },
-          { type: 5, name: "confirm", description: "Required: append this immutable adjustment.", required: true },
         ],
       },
       {
@@ -91,8 +91,8 @@ export const progressionCommands = [
           { type: 6, name: "member", description: "Member receiving the session reward.", required: true },
           tableNumber,
           characterId,
-          eventId,
           { type: 3, name: "reason", description: "Required override reason.", required: true, min_length: 3, max_length: 500 },
+          eventId,
         ],
       },
     ],
