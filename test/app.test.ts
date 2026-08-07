@@ -3,9 +3,10 @@ import {
   commandSchemaVersionLine,
   handleDiscordInteraction,
 } from "../src/app";
+import { DISCORD_COMMAND_SCHEMA_VERSION } from "../src/command-schema-version.js";
 
 it("renders the Worker command-schema version for guild doctor", () => {
-  expect(commandSchemaVersionLine()).toMatch(/Discord command schema.*2026\.08\.06\.4/);
+  expect(commandSchemaVersionLine()).toContain(DISCORD_COMMAND_SCHEMA_VERSION);
 });
 
 const env = {
@@ -21,6 +22,26 @@ const env = {
 describe("deferred Discord interactions", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("answers autocomplete immediately instead of deferring", async () => {
+    let background: Promise<unknown> | undefined;
+    const context = {
+      waitUntil(promise: Promise<unknown>) {
+        background = promise;
+      },
+    } as ExecutionContext;
+
+    const response = await handleDiscordInteraction({
+      id: "autocomplete-1",
+      type: 4,
+      guild_id: "1533181439376494642",
+      member: { user: { id: "1533183019031199946" } },
+      data: { name: "unknown", options: [] },
+    }, env, context);
+
+    expect(await response.json()).toEqual({ type: 8, data: { choices: [] } });
+    expect(background).toBeUndefined();
   });
 
   it("acknowledges a command immediately and edits the private response in waitUntil", async () => {

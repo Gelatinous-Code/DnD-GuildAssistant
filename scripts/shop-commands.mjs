@@ -16,7 +16,7 @@ export const shopCommands = [
         name: "browse",
         description: "Browse the shopkeeper's wares",
         options: [
-          { type: option.string, name: "query", description: "Search names and descriptions" },
+          { type: option.string, name: "query", description: "Search item names first, then descriptions" },
           { type: option.string, name: "category", description: "Exact category" },
           { type: option.string, name: "tag", description: "Exact tag" },
           { type: option.boolean, name: "free", description: "Show only free or only paid items" },
@@ -27,10 +27,10 @@ export const shopCommands = [
         name: "buy",
         description: "Preview a purchase before gold is charged",
         options: [
-          { type: option.string, name: "item_id", description: "Stable item ID from browse", required: true },
-          { type: option.string, name: "character_id", description: "Your approved active character ID", required: true },
+          { type: option.string, name: "item_id", description: "Start typing an item name", required: true, autocomplete: true },
+          { type: option.string, name: "character_id", description: "Start typing your character name", required: true, autocomplete: true },
           { type: option.integer, name: "quantity", description: "Quantity (default 1)", min_value: 1, max_value: 99 },
-          { type: option.string, name: "item_id_2", description: "Optional second distinct item ID" },
+          { type: option.string, name: "item_id_2", description: "Optional second item name", autocomplete: true },
           { type: option.integer, name: "quantity_2", description: "Second item quantity (default 1)", min_value: 1, max_value: 99 },
         ],
       },
@@ -39,13 +39,13 @@ export const shopCommands = [
         name: "history",
         description: "View your immutable shop receipts",
         options: [
-          { type: option.string, name: "character_id", description: "Optionally filter by character ID" },
+          { type: option.string, name: "character_id", description: "Optionally filter by character name", autocomplete: true },
         ],
       },
       {
         type: option.subcommand,
         name: "characters",
-        description: "List your active approved character IDs",
+        description: "Show your characters available for purchases",
       },
     ],
   },
@@ -60,7 +60,7 @@ export const shopCommands = [
         name: "item",
         description: "Create or replace a catalog item",
         options: [
-          { type: option.string, name: "item_id", description: "Stable lowercase ID", required: true },
+          { type: option.string, name: "item_id", description: "Stable ID; existing items are suggested", required: true, autocomplete: true },
           { type: option.string, name: "name", description: "Display name", required: true },
           { type: option.string, name: "category", description: "Category", required: true },
           { type: option.string, name: "description", description: "Player-facing description", required: true, max_length: 2000 },
@@ -88,7 +88,7 @@ export const shopCommands = [
         name: "active",
         description: "Deactivate or restore an item without deleting history",
         options: [
-          { type: option.string, name: "item_id", description: "Stable item ID", required: true },
+          { type: option.string, name: "item_id", description: "Start typing an item name", required: true, autocomplete: true },
           { type: option.boolean, name: "active", description: "Whether players can buy it", required: true },
           { type: option.string, name: "reason", description: "Audit reason", required: true },
         ],
@@ -98,7 +98,7 @@ export const shopCommands = [
         name: "eligibility",
         description: "Mark an approved character as an Artificer",
         options: [
-          { type: option.string, name: "character_id", description: "Character ID", required: true },
+          { type: option.string, name: "character_id", description: "Start typing a character name", required: true, autocomplete: true },
           { type: option.string, name: "reason", description: "Audit reason", required: true },
         ],
       },

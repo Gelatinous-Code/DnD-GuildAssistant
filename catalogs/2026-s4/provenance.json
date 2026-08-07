@@ -1,0 +1,59 @@
+{
+  "season": "2026 S4",
+  "source": {
+    "file": "Guild Shop 2026 S4.xlsx",
+    "sha256": "bab121922b97a6762d4b357acb38510fff9db2221d8891520bd1d78b12828c1c",
+    "worksheet": "MasterList_Hidden",
+    "range": "A1:AI597",
+    "columns": 35,
+    "namedItemRows": 471
+  },
+  "extractedImport": {
+    "file": "guild-shop-2026-s4.json",
+    "sha256": "ec197943e98fb9f2d4f9d05029a45cf380e4ebb342827029f440eeb9244ee875",
+    "mappingRevision": "shop-catalog-2026-s4-v2",
+    "importBatchId": "shop-import:ec197943e98fb9f2d4f9:d6aa1097"
+  },
+  "reconciliation": {
+    "total": 471,
+    "sourceClasses": {
+      "free": 168,
+      "numericGold": 296,
+      "artificerOnly": 7
+    },
+    "storedClasses": {
+      "zeroGold": 175,
+      "paid": 296,
+      "restricted": 7,
+      "requiresAttunement": 175,
+      "itemProficiencyRequired": 78
+    },
+    "missingDescriptions": 0,
+    "uniqueStableItemIds": 471
+  },
+  "isolatedLocalD1Validation": {
+    "appliedAt": "2026-08-07",
+    "catalogRevision": 1,
+    "importedCount": 471,
+    "deactivatedCount": 0,
+    "storedCount": 471,
+    "activeCount": 471,
+    "itemRevisionCountAfterReplay": 471,
+    "idempotentReplay": true
+  },
+  "remoteTestGuildValidation": {
+    "appliedAt": "2026-08-07T11:58:59.730Z",
+    "catalogRevision": 2,
+    "importedCount": 471,
+    "deactivatedSupersededCount": 471,
+    "storedCountIncludingInactive": 942,
+    "activeCount": 471,
+    "zeroGoldCount": 175,
+    "restrictedCount": 7,
+    "requiresAttunementCount": 175,
+    "itemRevisionCount": 1413,
+    "matchingBatchCountAfterReplay": 1,
+    "rowsWrittenByReplay": 0,
+    "idempotentReplay": true
+  }
+}

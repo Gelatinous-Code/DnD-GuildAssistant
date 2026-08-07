@@ -2,6 +2,7 @@ export const InteractionType = {
   Ping: 1,
   ApplicationCommand: 2,
   MessageComponent: 3,
+  ApplicationCommandAutocomplete: 4,
   ModalSubmit: 5,
 } as const;
 
@@ -11,6 +12,7 @@ export const InteractionResponseType = {
   DeferredChannelMessageWithSource: 5,
   DeferredUpdateMessage: 6,
   UpdateMessage: 7,
+  ApplicationCommandAutocompleteResult: 8,
   Modal: 9,
 } as const;
 
@@ -57,6 +59,7 @@ export interface DiscordInteractionOption {
   name: string;
   type: number;
   value?: string | number | boolean;
+  focused?: boolean;
   options?: DiscordInteractionOption[];
 }
 

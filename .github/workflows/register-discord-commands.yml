@@ -1,6 +1,12 @@
 name: Register Discord commands
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/*-commands.mjs"
+      - "scripts/commands.mjs"
+      - "src/command-schema-version.js"
   workflow_dispatch:
     inputs:
       target_guild_id:
@@ -31,17 +37,18 @@ jobs:
     environment: discord-command-registration
     steps:
       - name: Require deployment confirmation
-        if: ${{ !inputs.deployment_verified }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.deployment_verified }}
         run: |
           echo "::error::Deploy the compatible Worker and D1 migrations before registering commands."
           exit 1
       - name: Check out trusted main history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: main
+          ref: ${{ github.event_name == 'push' && github.sha || 'main' }}
           fetch-depth: 0
           persist-credentials: false
       - name: Verify and select deployed commit
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         shell: bash
         env:
           DEPLOYED_REF: ${{ inputs.deployed_ref }}
@@ -68,4 +75,5 @@ jobs:
         env:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_APPLICATION_ID: ${{ vars.DISCORD_APPLICATION_ID }}
-          DISCORD_GUILD_ID: ${{ inputs.target_guild_id }}
+          # Automatic merge registration intentionally targets only the disposable test guild.
+          DISCORD_GUILD_ID: ${{ github.event_name == 'push' && '1533181439376494642' || inputs.target_guild_id }}

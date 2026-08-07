@@ -6,6 +6,24 @@ import { describe, expect, it } from "vitest";
 import { commands, DISCORD_COMMAND_SCHEMA_VERSION } from "../scripts/commands.mjs";
 
 describe("Discord command safety boundary", () => {
+  it("places every required option before optional options", () => {
+    for (const command of commands) {
+      for (const subcommand of command.options ?? []) {
+        let optionalSeen = false;
+        for (const option of subcommand.options ?? []) {
+          if (option.required === true) {
+            expect(
+              optionalSeen,
+              `/${command.name} ${subcommand.name}: required option ${option.name} follows an optional option`,
+            ).toBe(false);
+          } else {
+            optionalSeen = true;
+          }
+        }
+      }
+    }
+  });
+
   it("does not expose member-role management commands or options", () => {
     expect(commands.some((command: { name: string }) => command.name === "roles")).toBe(false);
 

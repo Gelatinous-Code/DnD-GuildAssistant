@@ -2,6 +2,9 @@ import {
   commands,
   DISCORD_COMMAND_SCHEMA_VERSION,
 } from "./commands.mjs";
+import { validateCommandSchema } from "./validate-command-schema.mjs";
+
+validateCommandSchema(commands);
 
 const applicationId = process.env.DISCORD_APPLICATION_ID;
 const guildId = process.env.DISCORD_GUILD_ID ?? process.env.DISCORD_TEST_GUILD_ID;
@@ -40,7 +43,7 @@ const response = await fetch(endpoint, {
 
 const body = await response.json();
 if (!response.ok) {
-  console.error(`Discord returned ${response.status}:`, body);
+  console.error(`Discord returned ${response.status}:\n${JSON.stringify(body, null, 2)}`);
   process.exit(1);
 }
 

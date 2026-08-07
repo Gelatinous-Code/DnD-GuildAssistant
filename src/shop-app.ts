@@ -1,7 +1,9 @@
 import type { DiscordInteraction } from "./discord";
 import {
+  autocomplete,
   booleanOption,
   ephemeral,
+  focusedOption,
   invokingUserId,
   isGuildAdmin,
   numberOption,
@@ -10,7 +12,13 @@ import {
   stringOption,
   UserFacingError,
 } from "./interaction-utils";
-import { ShopRuleError, ShopService, type ShopEligibility } from "./shop-service";
+import {
+  ShopRuleError,
+  ShopService,
+  type ShopCatalogItem,
+  type ShopCharacterChoice,
+  type ShopEligibility,
+} from "./shop-service";
 
 function text(value: string | undefined, label: string): string {
   if (!value?.trim()) throw new UserFacingError(`${label} is required.`);
@@ -25,6 +33,99 @@ function whole(value: number | undefined, label: string, fallback?: number): num
 
 function price(value: number): string {
   return value === 0 ? "FREE" : `${value.toLocaleString()} gp`;
+}
+
+function choiceName(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, 100);
+}
+
+function itemChoice(item: ShopCatalogItem): { name: string; value: string } {
+  return {
+    name: choiceName(
+      `${item.name} — ${price(item.priceGold)}${item.active ? "" : " — inactive"}`,
+    ),
+    value: item.itemId,
+  };
+}
+
+function characterChoice(character: ShopCharacterChoice): { name: string; value: string } {
+  return {
+    name: choiceName(`${character.name}${character.isMain ? " — main" : " — alternate"}`),
+    value: character.characterId,
+  };
+}
+
+function compactDescription(value: string, maxLength = 96): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length <= maxLength
+    ? compact
+    : compact.slice(0, maxLength - 1).trimEnd() + "…";
+}
+
+function rankOwnedCharacters<T extends ShopCharacterChoice>(
+  characters: readonly T[],
+  query: string,
+): T[] {
+  const value = query.trim().toLowerCase();
+  if (!value) return [...characters];
+  return characters
+    .filter((character) =>
+      character.name.toLowerCase().includes(value) ||
+      character.characterId.toLowerCase().includes(value)
+    )
+    .sort((left, right) => {
+      const rank = (character: T) => {
+        const name = character.name.toLowerCase();
+        const id = character.characterId.toLowerCase();
+        if (name === value || id === value) return 0;
+        if (name.startsWith(value)) return 1;
+        return 2;
+      };
+      return rank(left) - rank(right) || Number(right.isMain) - Number(left.isMain) ||
+        left.name.localeCompare(right.name);
+    });
+}
+
+export async function handleShopAutocomplete(
+  interaction: DiscordInteraction,
+  env: Env,
+): Promise<Response | null> {
+  const invocation = parseCommand(interaction);
+  if (invocation.command !== "shop" && invocation.command !== "shop-admin") return null;
+  const focused = focusedOption(interaction);
+  if (!focused) return autocomplete([]);
+  const guildId = requireGuild(interaction);
+  const actorUserId = invokingUserId(interaction);
+  if (!actorUserId) return autocomplete([]);
+  const shop = new ShopService(env.DB);
+  if (invocation.command === "shop-admin" && !isGuildAdmin(interaction)) {
+    return autocomplete([]);
+  }
+
+  if (focused.name === "item_id" || focused.name === "item_id_2") {
+    const includeInactive = invocation.command === "shop-admin";
+    const items = await shop.listCatalog({
+      guildId,
+      query: focused.value || undefined,
+      includeInactive,
+      limit: 20,
+      sort: focused.value.trim() ? "relevance" : "name",
+    });
+    return autocomplete(items.map(itemChoice));
+  }
+
+  if (focused.name === "character_id") {
+    if (invocation.command === "shop-admin") {
+      const characters = await shop.searchApprovedCharacters(guildId, focused.value, 20);
+      return autocomplete(characters.map(characterChoice));
+    }
+    const characters = await shop.approvedCharacters(guildId, actorUserId);
+    return autocomplete(
+      rankOwnedCharacters(characters, focused.value).slice(0, 20).map(characterChoice),
+    );
+  }
+
+  return autocomplete([]);
 }
 
 function confirmComponents(previewId: string): Record<string, unknown>[] {
@@ -88,7 +189,11 @@ export async function handleShopCommand(
       if (invocation.subcommand === "active") {
         const item = await shop.setItemActive({
           guildId,
-          itemId: text(stringOption(invocation, "item_id"), "Item ID"),
+          itemId: await shop.resolveItemId(
+            guildId,
+            text(stringOption(invocation, "item_id"), "Item"),
+            true,
+          ),
           active: booleanOption(invocation, "active") ?? true,
           actorUserId,
           reason: text(stringOption(invocation, "reason"), "Reason"),
@@ -98,7 +203,10 @@ export async function handleShopCommand(
       if (invocation.subcommand === "eligibility") {
         await shop.grantEligibility({
           guildId,
-          characterId: text(stringOption(invocation, "character_id"), "Character ID"),
+          characterId: await shop.resolveGuildCharacterId(
+            guildId,
+            text(stringOption(invocation, "character_id"), "Character"),
+          ),
           actorUserId,
           reason: text(stringOption(invocation, "reason"), "Reason"),
         });
@@ -149,13 +257,14 @@ export async function handleShopCommand(
         category: stringOption(invocation, "category"),
         tag: stringOption(invocation, "tag"),
         free: booleanOption(invocation, "free"),
-        limit: 10,
+        limit: 5,
+        sort: "relevance",
       });
       if (!items.length) return ephemeral("🕸️ The shelf is bare for those filters.");
       const lines = items.map((item) =>
         `• **${item.name}** — ${price(item.priceGold)} · ${item.category}` +
         `${item.eligibility === "artificer" ? " · Artificer only" : ""}` +
-        `\n  ${item.description.slice(0, 180)} · \`${item.itemId}\``,
+        `\n  ${compactDescription(item.description)}`,
       );
       return ephemeral(
         `**${config?.shopkeeperName ?? "The Quartermaster"}**
@@ -163,12 +272,18 @@ export async function handleShopCommand(
 
 ${lines.join("\n").slice(0, 1_750)}
 
-Use \`/shop buy\` with an item and one of your approved character IDs.`,
+Showing up to five best matches. In the shop buy command, start typing an item and character name; Discord will suggest the available choices.`,
       );
     }
     if (invocation.subcommand === "buy") {
-      const firstItemId = text(stringOption(invocation, "item_id"), "Item ID");
-      const secondItemId = stringOption(invocation, "item_id_2")?.trim();
+      const firstItemId = await shop.resolveItemId(
+        guildId,
+        text(stringOption(invocation, "item_id"), "Item"),
+      );
+      const secondItemReference = stringOption(invocation, "item_id_2")?.trim();
+      const secondItemId = secondItemReference
+        ? await shop.resolveItemId(guildId, secondItemReference)
+        : undefined;
       const items = [{
         itemId: firstItemId,
         quantity: whole(numberOption(invocation, "quantity"), "Quantity", 1),
@@ -180,7 +295,11 @@ Use \`/shop buy\` with an item and one of your approved character IDs.`,
       const preview = await shop.createCartPreview({
         guildId,
         userId: actorUserId,
-        characterId: text(stringOption(invocation, "character_id"), "Character ID"),
+        characterId: await shop.resolveOwnedCharacterId(
+          guildId,
+          actorUserId,
+          text(stringOption(invocation, "character_id"), "Character"),
+        ),
         items,
       });
       return ephemeral(
@@ -194,10 +313,13 @@ The shopkeeper will hold this offer for 10 minutes.`,
       );
     }
     if (invocation.subcommand === "history") {
+      const characterReference = stringOption(invocation, "character_id")?.trim();
       const receipts = await shop.listReceipts(
         guildId,
         actorUserId,
-        stringOption(invocation, "character_id"),
+        characterReference
+          ? await shop.resolveOwnedCharacterId(guildId, actorUserId, characterReference)
+          : undefined,
       );
       return ephemeral(receipts.length
         ? `**Your recent shop receipts**
@@ -212,7 +334,7 @@ ${receipts.map((receipt) =>
       return ephemeral(characters.length
         ? `**Characters eligible to shop**
 ${characters.map((character) =>
-  `• **${character.name}**${character.isMain ? " — main" : ""} · \`${character.characterId}\``,
+  `• **${character.name}** — ${character.isMain ? "main" : "alternate"} character`,
 ).join("\n")}`
         : "You have no active, approved characters eligible to shop.");
     }
