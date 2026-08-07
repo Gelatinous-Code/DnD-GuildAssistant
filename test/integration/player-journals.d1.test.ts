@@ -275,6 +275,47 @@ describe("D1 player journals", () => {
       publicationStatus: "hidden",
       deliveryStatus: "hidden",
     });
+    const hiddenMemberResponse = await handleWebsiteLibraryReadRequest(new Request(
+      `https://guild.example/api/v1/guilds/${fixture.guildId}/player-journals`,
+      { headers: {
+        Authorization: "Bearer player-token",
+        "X-Guild-Contract-Version": "player-journals.v1",
+      } },
+    ), env, {
+      now: () => now,
+      fetch: async () => Response.json({
+        user: { id: fixture.playerId }, roles: ["role-player"], pending: false,
+      }),
+    });
+    await expect(hiddenMemberResponse!.json()).resolves.toMatchObject({ items: [] });
+
+    await env.DB.prepare(
+      "UPDATE guild_config SET admin_role_id = 'role-admin' WHERE guild_id = ?",
+    ).bind(fixture.guildId).run();
+    const hiddenAdminResponse = await handleWebsiteLibraryReadRequest(new Request(
+      `https://guild.example/api/v1/guilds/${fixture.guildId}/player-journals?visibility=all`,
+      { headers: {
+        Authorization: "Bearer admin-token",
+        "X-Guild-Contract-Version": "player-journals.v1",
+      } },
+    ), env, {
+      now: () => now,
+      fetch: async () => Response.json({
+        user: { id: fixture.adminId }, roles: ["role-admin"], pending: false,
+      }),
+    });
+    const hiddenAdminFeed = await hiddenAdminResponse!.json() as {
+      adminDiagnostics: { hiddenJournals: number };
+      items: Array<{
+        publicationStatus: string;
+        moderation: { reason: string };
+      }>;
+    };
+    expect(hiddenAdminFeed.adminDiagnostics.hiddenJournals).toBe(1);
+    expect(hiddenAdminFeed.items[0]).toMatchObject({
+      publicationStatus: "hidden",
+      moderation: { reason: "Temporarily hidden for moderation" },
+    });
     await service.moderate({
       guildId: fixture.guildId,
       journalId: draft.journalId,

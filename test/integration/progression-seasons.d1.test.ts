@@ -132,13 +132,23 @@ describe("D1 progression seasons", () => {
     });
     expect(progressionFeed?.status).toBe(200);
     const progressionBody = await progressionFeed!.json() as {
+      viewer: { userId: string; roles: string[] };
+      characters: Array<{ characterId: string; status: string; isMain: boolean }>;
       balances: Array<{ seasonId: string; xp: number; gold: number; level: number }>;
     };
+    expect(progressionBody.viewer).toEqual({
+      userId: ownerId,
+      roles: ["guild_player"],
+      capabilities: expect.objectContaining({ readOwnProgression: true }),
+    });
+    expect(progressionBody.characters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ characterId: character.characterId, status: "approved", isMain: true }),
+      expect.objectContaining({ characterId: archivedCharacterId, status: "archived" }),
+    ]));
     expect(progressionBody.balances).toEqual(expect.arrayContaining([
       expect.objectContaining({ seasonId: "legacy", xp: 15, gold: 400, level: 6 }),
       expect.objectContaining({ seasonId: "season-6", xp: 0, gold: 0, level: 3 }),
     ]));
-    expect(JSON.stringify(progressionBody)).not.toContain(ownerId);
 
     const replay = await seasons.rollover({
       guildId,

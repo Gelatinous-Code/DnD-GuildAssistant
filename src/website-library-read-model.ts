@@ -1,61 +1,43 @@
-import { GuildRepository } from "./storage/repository";
-import { WebsiteReadRepository } from "./storage/website-read-repository";
 import {
   WEBSITE_LIBRARY_CONTRACTS,
   WebsiteLibraryRepository,
+  type WebsiteLibraryCursor,
   type WebsiteLibraryResource,
 } from "./storage/website-library-repository";
+import {
+  apiJson,
+  authorizeWebsiteRead,
+  decodeOpaqueCursor,
+  encodeOpaqueCursor,
+  privateJsonWithEtag,
+  viewer,
+  type WebsiteReadOptions,
+} from "./website-read-security";
 
-const DISCORD_API = "https://discord.com/api/v10";
-const MAX_AUTHORIZATION_LENGTH = 4_096;
+export type WebsiteLibraryReadOptions = WebsiteReadOptions;
 
-export interface WebsiteLibraryReadOptions {
-  fetch?: typeof fetch;
-  now?: () => number;
+function decodeCursor(value: string | null, kind: "number" | "string"): WebsiteLibraryCursor | null {
+  const parsed = decodeOpaqueCursor(value);
+  if (parsed === null) return null;
+  if (!parsed || typeof parsed !== "object") throw new TypeError("cursor is invalid");
+  const sortValue = Reflect.get(parsed, "sortValue");
+  const id = Reflect.get(parsed, "id");
+  if (
+    typeof id !== "string" || !id
+    || (kind === "number" && !Number.isSafeInteger(sortValue))
+    || (kind === "string" && (typeof sortValue !== "string" || !sortValue))
+  ) {
+    throw new TypeError("cursor is invalid");
+  }
+  return kind === "number"
+    ? { sortValue: Number(sortValue), id }
+    : { sortValue: String(sortValue), id };
 }
 
-function apiJson(body: unknown, status: number, headers: HeadersInit = {}): Response {
-  return Response.json(body, {
-    status,
-    headers: {
-      "Cache-Control": "private, no-store",
-      "Content-Type": "application/json; charset=utf-8",
-      "X-Content-Type-Options": "nosniff",
-      Vary: "Authorization",
-      ...headers,
-    },
-  });
-}
-
-function bearerToken(request: Request): string | null {
-  const authorization = request.headers.get("authorization");
-  if (!authorization || authorization.length > MAX_AUTHORIZATION_LENGTH) return null;
-  return /^Bearer ([^\s]+)$/.exec(authorization)?.[1] ?? null;
-}
-
-async function currentMember(guildId: string, token: string, fetcher: typeof fetch) {
-  const response = await fetcher(`${DISCORD_API}/users/@me/guilds/${guildId}/member`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if ([401, 403, 404].includes(response.status)) return null;
-  if (!response.ok) throw new Error(`Discord membership verification failed with HTTP ${response.status}`);
-  const value = await response.json() as Record<string, unknown>;
-  const user = value.user as Record<string, unknown> | undefined;
-  return {
-    userId: typeof user?.id === "string" ? user.id : null,
-    roles: Array.isArray(value.roles)
-      ? value.roles.filter((role): role is string => typeof role === "string")
-      : [],
-    pending: value.pending === true,
-  };
-}
-
-async function etag(body: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
-  const encoded = btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-  return `"${encoded}"`;
+function boundedFilter(value: string | null, maximum: number, error: string): string | null {
+  const normalized = value?.trim() ?? "";
+  if (normalized.length > maximum) throw new TypeError(error);
+  return normalized || null;
 }
 
 export async function handleWebsiteLibraryReadRequest(
@@ -68,7 +50,9 @@ export async function handleWebsiteLibraryReadRequest(
     url.pathname,
   );
   if (!match) return null;
-  if (request.method !== "GET") return apiJson({ error: "method_not_allowed" }, 405, { Allow: "GET" });
+  if (request.method !== "GET") {
+    return apiJson({ error: "method_not_allowed" }, 405, { Allow: "GET" });
+  }
 
   const guildId = match[1]!;
   const resource = match[2]! as WebsiteLibraryResource;
@@ -76,83 +60,127 @@ export async function handleWebsiteLibraryReadRequest(
   if (request.headers.get("x-guild-contract-version") !== contract) {
     return apiJson({ error: "unsupported_contract_version", supported: [contract] }, 406);
   }
-  const token = bearerToken(request);
-  if (!token) return apiJson({ error: "discord_oauth_required" }, 401);
-  const config = await new GuildRepository(env.DB).getGuildConfig(guildId);
-  if (!config) return apiJson({ error: "guild_not_found" }, 404);
-  const allowedRoles = [config.reminderRoleId, config.adminRoleId].filter(
-    (role): role is string => Boolean(role),
-  );
-  if (!allowedRoles.length) return apiJson({ error: "website_role_not_configured" }, 503);
-
-  let member: Awaited<ReturnType<typeof currentMember>>;
-  try {
-    member = await currentMember(guildId, token, options.fetch ?? fetch);
-  } catch (error) {
-    console.error(JSON.stringify({
-      kind: "guild-assistant.website-library-membership-error",
-      guildId,
-      resource,
-      errorKind: error instanceof Error ? error.name : typeof error,
-    }));
-    return apiJson({ error: "membership_verification_unavailable" }, 503);
-  }
-  if (!member?.userId) return apiJson({ error: "not_a_current_guild_member" }, 401);
-  if (member.pending || !member.roles.some((role) => allowedRoles.includes(role))) {
-    return apiJson({ error: "guild_player_role_required" }, 403);
-  }
-
-  const now = options.now?.() ?? Date.now();
-  const rate = await new WebsiteReadRepository(env.DB).consumeRateLimit({
-    guildId,
-    userId: member.userId,
-    now,
-  });
-  if (!rate.allowed) {
-    return apiJson({ error: "rate_limited" }, 429, { "Retry-After": String(rate.retryAfterSeconds) });
-  }
-
-  const limitText = url.searchParams.get("limit");
-  const limit = limitText === null ? 20 : Number(limitText);
-  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
-    return apiJson({ error: "limit_must_be_between_1_and_50" }, 400);
-  }
+  const authorization = await authorizeWebsiteRead({ request, env, guildId, resource, options });
+  if (authorization.response) return authorization.response;
+  const member = authorization.member;
   const repository = new WebsiteLibraryRepository(env.DB);
-  let payload: Record<string, unknown>;
-  if (resource === "player-journals") {
-    payload = { schemaVersion: contract, guildId, generatedAt: now,
-      items: await repository.listPlayerJournals(guildId, limit) };
-  } else if (resource === "historical-summaries") {
-    payload = { schemaVersion: contract, guildId, generatedAt: now,
-      items: await repository.listHistoricalSummaries(guildId, limit) };
-  } else {
-    const requestedSeason = url.searchParams.get("season")?.trim() || "current";
-    if (requestedSeason.length > 80) return apiJson({ error: "season_filter_too_long" }, 400);
-    const seasons = await repository.listProgressionSeasons(guildId);
-    const seasonId = requestedSeason === "all" ? null
-      : requestedSeason === "current"
-        ? seasons.find((season) => season.status === "current")?.seasonId ?? "__missing__"
-        : requestedSeason;
-    if (seasonId !== null && !seasons.some((season) => season.seasonId === seasonId)) {
-      return apiJson({ error: "season_not_found" }, 404);
-    }
-    payload = { schemaVersion: contract, guildId, generatedAt: now,
-      selectedSeason: requestedSeason, seasons,
-      balances: await repository.listProgressionBalances(guildId, seasonId) };
-  }
 
-  const serialized = JSON.stringify(payload);
-  const validator = await etag(serialized);
-  if (request.headers.get("if-none-match") === validator) {
-    return new Response(null, { status: 304, headers: {
-      "Cache-Control": "private, no-store", ETag: validator, Vary: "Authorization",
-    } });
+  try {
+    const limitText = url.searchParams.get("limit");
+    const limit = limitText === null ? 20 : Number(limitText);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+      return apiJson({ error: "limit_must_be_between_1_and_50" }, 400);
+    }
+    const visibility = url.searchParams.get("visibility") ?? "visible";
+    if (visibility !== "visible" && visibility !== "all") {
+      return apiJson({ error: "visibility_must_be_visible_or_all" }, 400);
+    }
+    if (visibility === "all" && !member.isAdmin) {
+      return apiJson({ error: "administrator_role_required" }, 403);
+    }
+    const adminDiagnostics = member.isAdmin
+      ? await repository.getAdminDiagnostics(guildId)
+      : undefined;
+
+    let payload: Record<string, unknown>;
+    if (resource === "player-journals") {
+      const page = await repository.listPlayerJournals({
+        guildId,
+        limit,
+        cursor: decodeCursor(url.searchParams.get("cursor"), "number"),
+        characterId: boundedFilter(
+          url.searchParams.get("character_id"), 200, "character_filter_too_long",
+        ),
+        eventId: boundedFilter(url.searchParams.get("event_id"), 200, "event_filter_too_long"),
+        includeHidden: visibility === "all",
+      });
+      payload = {
+        schemaVersion: contract,
+        guildId,
+        viewer: viewer(member),
+        generatedAt: page.items.reduce(
+          (latest, item) => Math.max(latest, item.lastSubmittedAt, item.moderation?.hiddenAt ?? 0),
+          0,
+        ),
+        items: page.items,
+        nextCursor: encodeOpaqueCursor(page.nextCursor),
+        ...(adminDiagnostics ? { adminDiagnostics } : {}),
+      };
+    } else if (resource === "historical-summaries") {
+      const page = await repository.listHistoricalSummaries({
+        guildId,
+        limit,
+        cursor: decodeCursor(url.searchParams.get("cursor"), "string"),
+        season: boundedFilter(url.searchParams.get("season"), 80, "season_filter_too_long"),
+      });
+      payload = {
+        schemaVersion: contract,
+        guildId,
+        viewer: viewer(member),
+        generatedAt: 0,
+        items: page.items,
+        nextCursor: encodeOpaqueCursor(page.nextCursor),
+        ...(adminDiagnostics ? { adminDiagnostics } : {}),
+      };
+    } else {
+      const requestedSeason = url.searchParams.get("season")?.trim() || "current";
+      if (requestedSeason.length > 80) {
+        return apiJson({ error: "season_filter_too_long" }, 400);
+      }
+      const requestedCharacterId = boundedFilter(
+        url.searchParams.get("character_id"), 200, "character_filter_too_long",
+      );
+      const seasons = await repository.listProgressionSeasons(guildId);
+      const seasonId = requestedSeason === "all" ? null
+        : requestedSeason === "current"
+          ? seasons.find((season) => season.status === "current")?.seasonId ?? "__missing__"
+          : requestedSeason;
+      if (seasonId !== null && !seasons.some((season) => season.seasonId === seasonId)) {
+        return apiJson({ error: "season_not_found" }, 404);
+      }
+      const characters = await repository.listMemberCharacters(guildId, member.userId);
+      if (
+        requestedCharacterId !== null
+        && !characters.some((character) => character.characterId === requestedCharacterId)
+      ) {
+        return apiJson({ error: "character_not_found" }, 404);
+      }
+      const history = await repository.listProgressionHistory({
+        guildId,
+        ownerUserId: member.userId,
+        limit,
+        cursor: decodeCursor(url.searchParams.get("cursor"), "number"),
+        seasonId,
+        characterId: requestedCharacterId,
+      });
+      const balances = await repository.listProgressionBalances({
+        guildId,
+        ownerUserId: member.userId,
+        seasonId,
+        characterId: requestedCharacterId,
+      });
+      payload = {
+        schemaVersion: contract,
+        guildId,
+        viewer: viewer(member),
+        generatedAt: Math.max(
+          ...characters.map((character) => character.updatedAt),
+          ...history.items.map((entry) => entry.occurredAt),
+          0,
+        ),
+        selectedSeason: requestedSeason,
+        selectedCharacterId: requestedCharacterId,
+        seasons,
+        characters,
+        balances,
+        history: history.items,
+        nextCursor: encodeOpaqueCursor(history.nextCursor),
+        ...(adminDiagnostics ? { adminDiagnostics } : {}),
+      };
+    }
+    return privateJsonWithEtag(request, payload);
+  } catch (error) {
+    if (error instanceof TypeError) return apiJson({ error: error.message }, 400);
+    throw error;
   }
-  return new Response(serialized, { headers: {
-    "Cache-Control": "private, no-store",
-    "Content-Type": "application/json; charset=utf-8",
-    ETag: validator,
-    "X-Content-Type-Options": "nosniff",
-    Vary: "Authorization",
-  } });
 }
