@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { basename, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 function usage(message) {
@@ -173,8 +173,9 @@ function sqlList(values) {
 
 function buildSql({ items, guildId, actorId, sourceName, checksum, mappingRevision, importBatchId, now }) {
   const ids = items.map((item) => item.itemId);
+  // D1 executes this SQL file as an atomic batch; explicit transaction statements
+  // are rejected by the remote import API.
   const lines = [
-    "BEGIN TRANSACTION;",
     `INSERT OR IGNORE INTO shop_catalog_config (guild_id, updated_by_user_id, updated_at)
      VALUES (${sql(guildId)}, ${sql(actorId)}, ${now});`,
     `UPDATE shop_catalog_config SET catalog_revision=catalog_revision+1,
@@ -266,7 +267,6 @@ function buildSql({ items, guildId, actorId, sourceName, checksum, mappingRevisi
      WHERE guild_id=${sql(guildId)} AND import_batch_id IS NOT NULL
        AND import_batch_id IS NOT ${sql(importBatchId)} AND active=1
        AND item_id NOT IN (${sqlList(ids)});`,
-    "COMMIT;",
   );
   return lines.join("\n\n");
 }
@@ -328,8 +328,11 @@ if (!sqlPath) {
   await writeFile(sqlPath, sqlText, "utf8");
 }
 const scope = args.remote ? "--remote" : "--local";
-const executable = process.platform === "win32" ? "npx.cmd" : "npx";
-const apply = spawnSync(executable, ["wrangler", "d1", "execute", "DB", scope, "--file", sqlPath], {
+const executable = process.platform === "win32" ? process.execPath : "npx";
+const executablePrefix = process.platform === "win32"
+  ? [join(dirname(process.execPath), "node_modules", "npm", "bin", "npx-cli.js")]
+  : [];
+const apply = spawnSync(executable, [...executablePrefix, "wrangler", "d1", "execute", "DB", scope, "--file", sqlPath], {
   stdio: "inherit",
 });
 if (temporary) await unlink(sqlPath).catch(() => {});
@@ -340,7 +343,10 @@ const reconcile = `SELECT b.catalog_revision,b.imported_count,b.deactivated_coun
   (SELECT count(*) FROM shop_catalog_items i WHERE i.guild_id=b.guild_id AND i.price_gold=0 AND i.active=1) AS free_count,
   (SELECT count(*) FROM shop_catalog_items i WHERE i.guild_id=b.guild_id AND i.eligibility='artificer' AND i.active=1) AS restricted_count
   FROM shop_catalog_import_batches b WHERE b.import_batch_id=${sql(importBatchId)};`;
-const check = spawnSync(executable, ["wrangler", "d1", "execute", "DB", scope, "--command", reconcile], {
+const reconcilePath = join(tmpdir(), `${importBatchId.replaceAll(":", "-")}-reconcile.sql`);
+await writeFile(reconcilePath, reconcile, "utf8");
+const check = spawnSync(executable, [...executablePrefix, "wrangler", "d1", "execute", "DB", scope, "--file", reconcilePath], {
   stdio: "inherit",
 });
+await unlink(reconcilePath).catch(() => {});
 process.exit(check.status ?? 0);
