@@ -136,7 +136,21 @@ describe("member-safe website progression contract", () => {
         status: string;
         progressionState: string;
       }>;
-      balances: Array<{ characterId: string; xp: number; gold: number; level: number }>;
+      balances: Array<{
+        characterId: string;
+        xp: number;
+        gold: number;
+        level: number;
+        levelProgress: {
+          currentLevelMinimumXp: number;
+          nextLevel: number | null;
+          nextLevelMinimumXp: number | null;
+          xpIntoLevel: number;
+          xpRequiredForNextLevel: number | null;
+          xpRemaining: number | null;
+          isLevelCap: boolean;
+        };
+      }>;
       history: Array<{
         entryId: string;
         effective: boolean;
@@ -153,7 +167,21 @@ describe("member-safe website progression contract", () => {
     expect(body.characters.some((character) => character.characterId === other.characterId))
       .toBe(false);
     expect(body.balances).toEqual(expect.arrayContaining([
-      expect.objectContaining({ characterId: main.characterId, xp: 4, gold: 150, level: 4 }),
+      expect.objectContaining({
+        characterId: main.characterId,
+        xp: 4,
+        gold: 150,
+        level: 4,
+        levelProgress: {
+          currentLevelMinimumXp: 3,
+          nextLevel: 5,
+          nextLevelMinimumXp: 7,
+          xpIntoLevel: 1,
+          xpRequiredForNextLevel: 4,
+          xpRemaining: 3,
+          isLevelCap: false,
+        },
+      }),
     ]));
     expect(body.balances.some((balance) => balance.characterId === other.characterId)).toBe(false);
     expect(body.history).toHaveLength(1);

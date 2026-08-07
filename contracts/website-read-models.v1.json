@@ -89,7 +89,12 @@
         "progressionState", "isMain", "revision", "createdAt", "updatedAt"
       ],
       "balanceFields": [
-        "seasonId", "seasonName", "seasonStatus", "characterId", "xp", "gold", "level"
+        "seasonId", "seasonName", "seasonStatus", "characterId", "xp", "gold", "level",
+        "levelProgress"
+      ],
+      "levelProgressFields": [
+        "currentLevelMinimumXp", "nextLevel", "nextLevelMinimumXp", "xpIntoLevel",
+        "xpRequiredForNextLevel", "xpRemaining", "isLevelCap"
       ],
       "historyFields": [
         "entryId", "characterId", "characterName", "rewardCharacterId", "seasonId", "kind", "xpDelta",

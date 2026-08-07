@@ -8,7 +8,12 @@ import { WEBSITE_SUMMARY_CONTRACT_VERSION } from "../src/storage/website-read-re
 type ContractManifest = {
   contractSetVersion: string;
   authentication: { gmRoleAloneGrantsAccess: boolean };
-  resources: Record<string, { path: string; version: string }>;
+  resources: Record<string, {
+    path: string;
+    version: string;
+    balanceFields?: string[];
+    levelProgressFields?: string[];
+  }>;
   excludedFields: string[];
 };
 
@@ -30,6 +35,16 @@ describe("machine-readable website contract", () => {
       .toBe(WEBSITE_LIBRARY_CONTRACTS["historical-summaries"]);
     expect(manifest.resources.memberProgression.version)
       .toBe(WEBSITE_LIBRARY_CONTRACTS["progression-seasons"]);
+    expect(manifest.resources.memberProgression.balanceFields).toContain("levelProgress");
+    expect(manifest.resources.memberProgression.levelProgressFields).toEqual([
+      "currentLevelMinimumXp",
+      "nextLevel",
+      "nextLevelMinimumXp",
+      "xpIntoLevel",
+      "xpRequiredForNextLevel",
+      "xpRemaining",
+      "isLevelCap",
+    ]);
     expect(manifest.excludedFields).toEqual(expect.arrayContaining([
       "discord_access_token",
       "admin_actor_user_id",
@@ -48,5 +63,19 @@ describe("machine-readable website contract", () => {
       nextCursor: null,
     });
     expect(JSON.stringify(fixture)).not.toContain("token");
+    expect(fixture).toMatchObject({
+      balances: [{
+        level: 4,
+        levelProgress: {
+          currentLevelMinimumXp: 3,
+          nextLevel: 5,
+          nextLevelMinimumXp: 7,
+          xpIntoLevel: 1,
+          xpRequiredForNextLevel: 4,
+          xpRemaining: 3,
+          isLevelCap: false,
+        },
+      }],
+    });
   });
 });

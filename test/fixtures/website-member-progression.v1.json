@@ -45,7 +45,16 @@
       "characterId": "character-main",
       "xp": 4,
       "gold": 150,
-      "level": 4
+      "level": 4,
+      "levelProgress": {
+        "currentLevelMinimumXp": 3,
+        "nextLevel": 5,
+        "nextLevelMinimumXp": 7,
+        "xpIntoLevel": 1,
+        "xpRequiredForNextLevel": 4,
+        "xpRemaining": 3,
+        "isLevelCap": false
+      }
     }
   ],
   "history": [],

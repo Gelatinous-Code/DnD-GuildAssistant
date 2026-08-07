@@ -48,7 +48,7 @@ version rules.
 | --- | --- | --- |
 | `/api/v1/guilds/{guild_id}/player-journals` | `player-journals.v1` | Visible current journals with spoiler/source metadata; filters: `character_id`, `event_id`; administrators may use `visibility=all`. |
 | `/api/v1/guilds/{guild_id}/historical-summaries` | `historical-summaries.v1` | Published immutable imports only; optional exact `season` filter. |
-| `/api/v1/guilds/{guild_id}/progression-seasons` | `progression-seasons.v1` | The verified member's characters, main/frozen/archived state, per-season balances and level, plus ledger history and reversal/source provenance. Filters: `season` and owned `character_id`. |
+| `/api/v1/guilds/{guild_id}/progression-seasons` | `progression-seasons.v1` | The verified member's characters, main/frozen/archived state, per-season balances, level, and provider-authored next-level progress, plus ledger history and reversal/source provenance. Filters: `season` and owned `character_id`. |
 
 Every collection route accepts `limit` from 1–50 and returns an opaque
 `nextCursor`. Clients must not inspect or construct cursors. The authoritative
