@@ -56,6 +56,7 @@ Technical design and policy references:
 - [Historical summary import](historical-session-import.md)
 - [Protected website summary API](website-read-model.md)
 - [Website integration observability](integration-observability.md)
+- [Website management API boundary](decisions/0003-website-management-boundary.md)
 - [Automatic pre-session table threads](table-threads.md)
 - [Progression seasons and rollover](progression-seasons.md)
 - [Character registry](characters.md)
