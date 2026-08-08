@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seconddawnguild.com/contracts/member-data-inventory.v1.json",
+  "title": "Guild Assistant administrator member-data inventory",
+  "schemaVersion": "member-data-inventory.v1",
+  "policyVersion": "member-data-lifecycle.v1",
+  "access": {
+    "transport": "discord_ephemeral_admin_command",
+    "requiredPermission": "MANAGE_GUILD",
+    "browserAvailable": false,
+    "rawDatabaseAvailable": false
+  },
+  "actions": ["export", "departure"],
+  "revision": {
+    "algorithm": "SHA-256",
+    "encoding": "lowercase-hex",
+    "length": 64,
+    "covers": "bounded member-data export snapshot"
+  },
+  "mutatesData": false,
+  "countFields": [
+    "characters",
+    "characterEvents",
+    "journals",
+    "journalRevisions",
+    "seasonalBalances",
+    "progressionEntries",
+    "shopReceipts",
+    "officialRecaps",
+    "recapRevisions",
+    "weeklySignups",
+    "tableAssignments",
+    "sessionParticipationRecords",
+    "dmPriorityCredits"
+  ],
+  "classes": [
+    {
+      "id": "profile_references",
+      "departureTreatment": "pseudonymize_presentation"
+    },
+    {
+      "id": "characters",
+      "departureTreatment": "archive_and_remove_personal_links"
+    },
+    {
+      "id": "journals",
+      "departureTreatment": "hide_then_tombstone_authored_content"
+    },
+    {
+      "id": "official_recaps",
+      "departureTreatment": "preserve_shared_campaign_history"
+    },
+    {
+      "id": "progression",
+      "departureTreatment": "preserve_append_only_financial_history"
+    },
+    {
+      "id": "shop_receipts",
+      "departureTreatment": "preserve_append_only_financial_history"
+    },
+    {
+      "id": "priority_and_attendance",
+      "departureTreatment": "close_entitlements_and_preserve_history"
+    }
+  ],
+  "forbiddenPreviewFields": [
+    "discordAccessToken",
+    "discordBotToken",
+    "cookie",
+    "rawSql",
+    "journalText",
+    "recapText",
+    "sheetUrl",
+    "auditReason",
+    "shopItemContents"
+  ]
+}

@@ -65,12 +65,12 @@ computer has to remain switched on.
 The bot should not receive Discord Administrator permission. Its core channel
 permissions are View Channel, Send Messages, Embed Links, Read Message History,
 Create Public Threads, and Send Messages in Threads in each configured workflow
-channel. Attach Files is optional for CSV export, and Manage Threads is optional
+channel. Attach Files is optional for private CSV roster and JSON member-data exports, and Manage Threads is optional
 for administrator archive/repair controls. Manage Roles is not required.
 
 Admin responses and priority-token details are private. The bot restricts
 mentions, does not require Google or Raid Helper credentials, and provides a
-private CSV export only when an administrator asks for one.
+private roster or member-data exports only when an administrator asks for one.
 
 See [SECURITY.md](SECURITY.md) for private vulnerability reporting and the
 [operations guide](docs/operations.md#data-retention-and-deletion) for data

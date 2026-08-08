@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seconddawnguild.com/contracts/member-data-export.v1.json",
+  "title": "Guild Assistant administrator member-data export",
+  "schemaVersion": "member-data-export.v1",
+  "policyVersion": "member-data-lifecycle.v1",
+  "access": {
+    "transport": "discord_ephemeral_admin_attachment",
+    "requiredPermission": "MANAGE_GUILD",
+    "requiresCurrentGuildMember": true,
+    "requiresAttachFiles": true,
+    "browserAvailable": false,
+    "rawDatabaseAvailable": false
+  },
+  "revision": {
+    "algorithm": "SHA-256",
+    "encoding": "lowercase-hex",
+    "length": 64,
+    "mustMatchPreview": true
+  },
+  "limits": {
+    "rowsPerCollection": 500,
+    "attachmentBytes": 524288
+  },
+  "collections": [
+    "characters",
+    "characterEvents",
+    "journals",
+    "journalRevisions",
+    "seasonalBalances",
+    "seasonOpenings",
+    "progressionEntries",
+    "shopReceipts",
+    "shopReceiptItems",
+    "shopReceiptEvents",
+    "officialRecaps",
+    "recapRevisions",
+    "weeklySignups",
+    "tableAssignments",
+    "sessionParticipationRecords",
+    "dmPriorityGrants",
+    "dmPriorityCredits",
+    "dmPriorityCreditEvents"
+  ],
+  "forbiddenFields": [
+    "discordAccessToken",
+    "discordBotToken",
+    "cookie",
+    "rawSql",
+    "operationRequestJson",
+    "exceptionMessage"
+  ],
+  "financialNotice": "XP and gold are in-game values, not real money. Seasonal balances reset while ledger history is preserved."
+}

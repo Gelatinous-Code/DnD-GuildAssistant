@@ -1,4 +1,5 @@
 import { handleCharacterCommand } from "./character-app";
+import { handleMemberDataCommand } from "./member-data-app";
 import {
   handlePlayerJournalCommand,
   handlePlayerJournalInteraction,
@@ -109,53 +110,73 @@ export function commandSchemaVersionLine(): string {
   );
 }
 
-interface InternalAttachmentResponse {
+export interface InternalAttachmentResponse {
   filename: string;
   contentType: string;
   content: string;
   audit?: {
     guildId: string;
-    eventId: string;
+    eventId?: string;
     actorUserId?: string;
+    action?: string;
+    failureAction?: string;
+    entityType?: string;
+    entityId?: string;
+    operationKey?: string;
+    failureMessage?: string;
     details: Record<string, unknown>;
   };
 }
 
-async function recordAttachmentDelivery(
+export async function recordAttachmentDelivery(
   env: Env,
   attachment: InternalAttachmentResponse,
   status: "succeeded" | "failed",
   error?: unknown,
 ): Promise<void> {
   if (!attachment.audit) return;
+  const repository = new GuildRepository(env.DB);
+  const errorKind = error instanceof Error ? error.name : typeof error;
+  if (attachment.audit.operationKey) {
+    try {
+      await repository.finishOperation(
+        attachment.audit.operationKey,
+        status === "succeeded"
+          ? { status, result: { ...attachment.audit.details, deliveryStatus: status } }
+          : { status, error: `attachment_delivery_failed:${errorKind}` },
+      );
+    } catch (operationError) {
+      console.error(JSON.stringify({
+        kind: "guild-assistant.attachment-operation-error",
+        operationKey: attachment.audit.operationKey,
+        deliveryStatus: status,
+        errorKind: operationError instanceof Error ? operationError.name : typeof operationError,
+      }));
+    }
+  }
   try {
-    await new GuildRepository(env.DB).appendAudit({
+    await repository.appendAudit({
       guildId: attachment.audit.guildId,
       eventId: attachment.audit.eventId,
       actorUserId: attachment.audit.actorUserId,
-      action:
-        status === "succeeded"
-          ? "week.roster-exported"
-          : "week.roster-export-delivery-failed",
-      entityType: "weekly_event",
-      entityId: attachment.audit.eventId,
+      action: status === "succeeded"
+        ? (attachment.audit.action ?? "week.roster-exported")
+        : (attachment.audit.failureAction ?? "week.roster-export-delivery-failed"),
+      entityType: attachment.audit.entityType ?? "weekly_event",
+      entityId: attachment.audit.entityId ?? attachment.audit.eventId,
       details: {
         ...attachment.audit.details,
         deliveryStatus: status,
-        ...(status === "failed"
-          ? { errorKind: error instanceof Error ? error.name : typeof error }
-          : {}),
+        ...(status === "failed" ? { errorKind } : {}),
       },
     });
   } catch (auditError) {
-    console.error(
-      JSON.stringify({
-        kind: "guild-assistant.attachment-audit-error",
-        eventId: attachment.audit.eventId,
-        deliveryStatus: status,
-        errorKind: auditError instanceof Error ? auditError.name : typeof auditError,
-      }),
-    );
+    console.error(JSON.stringify({
+      kind: "guild-assistant.attachment-audit-error",
+      entityId: attachment.audit.entityId ?? attachment.audit.eventId,
+      deliveryStatus: status,
+      errorKind: auditError instanceof Error ? auditError.name : typeof auditError,
+    }));
   }
 }
 
@@ -1462,6 +1483,8 @@ async function executeDiscordInteraction(
     if (characterResponse !== null) return characterResponse;
     const journalResponse = await handlePlayerJournalCommand(interaction, env);
     if (journalResponse !== null) return journalResponse;
+    const memberDataResponse = await handleMemberDataCommand(interaction, env);
+    if (memberDataResponse !== null) return memberDataResponse;
     const progressionResponse = await handleProgressionCommand(interaction, env);
     if (progressionResponse !== null) return progressionResponse;
     const shopResponse = await handleShopCommand(interaction, env);
@@ -1552,6 +1575,7 @@ async function finishDeferredInteraction(
         );
         await discord.editOriginalInteractionResponse(applicationId, token, {
           content:
+            body.attachment.audit?.failureMessage ??
             "⚠️ The roster was generated, but Discord did not receive the file. Check Attach Files and run /week export again.",
           allowed_mentions: safeAllowedMentions(),
         });
