@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seconddawnguild.com/contracts/website-management.v1.json",
+  "title": "Second Dawn Guild Assistant website management contract",
+  "contractSetVersion": "website-management.v1",
+  "implementationStatus": "contract_only",
+  "transport": {
+    "kind": "cloudflare_service_binding_rpc",
+    "entrypoint": "WebsiteManagementApi",
+    "caller": "SecondDawnGuild.com Worker",
+    "browserCallable": false,
+    "publicHttpRoute": null,
+    "sharedServiceSecretRequired": false
+  },
+  "authentication": {
+    "endUserProof": "discord_oauth_bearer",
+    "discordScope": "guilds.members.read",
+    "reauthorizeEveryCall": true,
+    "requiredRole": "administrator",
+    "gmRoleAloneGrantsAccess": false,
+    "trustCallerSuppliedActor": false,
+    "serviceBindingIsCallerCapabilityNotUserAuthorization": true,
+    "failClosedWhenDiscordUnavailable": true
+  },
+  "requestEnvelope": {
+    "required": ["contractVersion", "guildId", "discordAccessToken", "correlationId"],
+    "guildId": { "type": "discord_snowflake", "maximumLength": 20 },
+    "discordAccessToken": { "type": "secret", "maximumLength": 4096, "loggable": false, "returnable": false, "persistent": false },
+    "correlationId": { "type": "uuid", "identity": false, "authorization": false },
+    "maximumSerializedBytes": 65536,
+    "unknownFields": "reject"
+  },
+  "methods": {
+    "describeManagementContract": { "version": "management-capabilities.v1", "implementationIssue": 59, "sideEffects": false, "returns": ["supportedVersions", "fieldMetadata", "diagnosticMetadata", "unavailableSettings"] },
+    "getEffectiveConfiguration": { "version": "effective-configuration.v1", "implementationIssue": 59, "sideEffects": false, "returns": ["schemaVersion", "guild", "viewer", "generatedAt", "configurationRevision", "setupCompleteness", "sections", "warnings"] },
+    "getDiagnostics": { "version": "management-diagnostics.v1", "implementationIssue": 59, "sideEffects": false, "returns": ["schemaVersion", "guild", "viewer", "generatedAt", "configurationRevision", "status", "checks"] },
+    "previewConfiguration": { "version": "configuration-preview.v1", "implementationIssue": 60, "sideEffects": false, "requires": ["expectedRevision", "changes"], "returns": ["normalizedChanges", "fieldErrors", "warnings", "impact", "previewRevision"] },
+    "applyConfiguration": { "version": "configuration-apply.v1", "implementationIssue": 60, "sideEffects": true, "requires": ["expectedRevision", "previewRevision", "idempotencyKey", "confirmation"], "returns": ["configurationRevision", "effectiveConfiguration", "auditReference"] }
+  },
+  "compatibility": {
+    "versionLocation": "request.contractVersion",
+    "unknownMajor": "reject",
+    "unknownMethod": "reject",
+    "unknownField": "reject",
+    "additiveResponseFields": "ignore_and_preserve_known_fields",
+    "providerFirstRollout": true,
+    "supportedVersionsAdvertisedBy": "describeManagementContract"
+  },
+  "revision": {
+    "name": "configurationRevision",
+    "type": "opaque_sha256_base64url",
+    "derivedFrom": "canonical safe effective configuration projection",
+    "changesWhen": "a supported effective field changes",
+    "expectedRevisionRequiredForPreviewAndApply": true,
+    "rawUpdatedAtIsNotConcurrencyControl": true
+  },
+  "rateLimits": {
+    "scope": ["guild_id", "discord_user_id", "method"],
+    "windowSeconds": 60,
+    "methods": { "describeManagementContract": 30, "getEffectiveConfiguration": 60, "getDiagnostics": 30, "previewConfiguration": 20, "applyConfiguration": 10 },
+    "exceededError": "rate_limited",
+    "retryAfterSecondsReturned": true
+  },
+  "audit": {
+    "correlationIdAcceptedFromCaller": true,
+    "correlationIdIsIdentityOrAuthorization": false,
+    "verifiedActorDerivedByProvider": true,
+    "readTelemetry": ["guild", "method", "contractVersion", "outcome", "latency", "correlationId"],
+    "mutationAudit": ["guild", "verifiedActorReference", "method", "priorRevision", "savedRevision", "idempotencyKeyHash", "outcome", "correlationId"],
+    "neverRecord": ["discordAccessToken", "botToken", "oauthClientSecret", "rawConfiguration", "privateMemberHistory"]
+  },  "configurationFields": [
+    { "id": "channels.player_signup_and_tables", "source": ["guild_config.event_channel_id", "guild_config.table_channel_id", "guild_config.reminder_channel_id"], "valueType": "discord_channel_reference", "valueShape": ["configured", "displayName", "opaqueReference"], "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "constraints": ["same_guild", "text_or_announcement_channel"] },
+    { "id": "channels.gm_signup", "source": ["guild_config.gm_signup_channel_id"], "valueType": "discord_channel_reference", "valueShape": ["configured", "displayName", "opaqueReference"], "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "constraints": ["same_guild", "text_or_announcement_channel", "fallback_player_channel"] },
+    { "id": "roles.guild_player", "source": ["guild_config.reminder_role_id"], "valueType": "discord_role_reference", "valueShape": ["configured", "displayName", "opaqueReference", "mentionable"], "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "constraints": ["same_guild"] },
+    { "id": "roles.gm_notifications", "source": ["guild_config.gm_notification_role_id"], "valueType": "discord_role_reference", "valueShape": ["configured", "displayName", "opaqueReference", "mentionable"], "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "constraints": ["same_guild", "optional"] },
+    { "id": "roles.administrator", "source": ["guild_config.admin_role_id"], "valueType": "discord_role_reference", "valueShape": ["configured", "displayName", "opaqueReference"], "access": "read_preview_apply", "sensitivity": "authorization_critical", "permission": "administrator", "constraints": ["same_guild", "cannot_remove_last_effective_admin_without_discord_fallback"] },
+    { "id": "schedule.timezone", "source": ["guild_config.timezone"], "valueType": "iana_timezone", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild" },
+    { "id": "schedule.game.weekday", "source": ["guild_config.weekly_day"], "valueType": "integer", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "minimum": 0, "maximum": 6 },
+    { "id": "schedule.game.time", "source": ["guild_config.weekly_time"], "valueType": "local_time", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild" },
+    { "id": "schedule.game.duration_minutes", "source": ["guild_config.event_duration_minutes"], "valueType": "integer", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "minimum": 60, "maximum": 720 },
+    { "id": "schedule.gm_signup.weekday", "source": ["guild_config.gm_signup_day"], "valueType": "integer", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "minimum": 0, "maximum": 6 },
+    { "id": "schedule.gm_signup.time", "source": ["guild_config.gm_signup_time"], "valueType": "local_time", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild" },
+    { "id": "schedule.player_signup.weekday", "source": ["guild_config.player_signup_day"], "valueType": "integer", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "minimum": 0, "maximum": 6 },
+    { "id": "schedule.player_signup.time", "source": ["guild_config.player_signup_time"], "valueType": "local_time", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild" },
+    { "id": "schedule.table_publish.weekday", "source": ["guild_config.table_publish_day"], "valueType": "integer", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "minimum": 0, "maximum": 6 },
+    { "id": "schedule.table_publish.time", "source": ["guild_config.table_publish_time"], "valueType": "local_time", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild" },
+    { "id": "schedule.open_seating.weekday", "source": ["guild_config.open_seating_day"], "valueType": "integer", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "minimum": 0, "maximum": 6 },
+    { "id": "schedule.open_seating.time", "source": ["guild_config.open_seating_time"], "valueType": "local_time", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild" },
+    { "id": "tables.minimum", "source": ["guild_config.table_min_size"], "valueType": "integer", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "minimum": 1, "maximum": 20, "dependency": "tables.minimum <= tables.preferred" },
+    { "id": "tables.preferred", "source": ["guild_config.table_preferred_size"], "valueType": "integer", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "minimum": 1, "maximum": 20, "dependency": "tables.minimum <= tables.preferred <= tables.maximum" },
+    { "id": "tables.maximum", "source": ["guild_config.table_max_size"], "valueType": "integer", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "minimum": 1, "maximum": 20, "dependency": "tables.preferred <= tables.maximum" },
+    { "id": "automation.mode", "source": ["guild_config.scheduling_enabled", "guild_config.auto_publish_enabled"], "valueType": "enum", "values": ["paused", "review", "autopilot"], "access": "read_preview_apply", "sensitivity": "high_impact", "permission": "administrator", "dependency": "core diagnostics must pass before leaving paused" },
+    { "id": "reminders.pre_lock.enabled", "source": ["reminder_rules.trigger=signup_lock"], "valueType": "boolean", "access": "read_preview_apply", "sensitivity": "guild_operational", "permission": "manage_guild", "dependency": "configured reminder channel and mentionable role when role targeting is used" }
+  ],
+  "fieldHelp": {
+    "channels.player_signup_and_tables": "Where players sign up, choose tables, and receive the normal weekly workflow posts.",
+    "channels.gm_signup": "Where Game Masters volunteer for upcoming Tuesday games.",
+    "roles.guild_player": "The role that grants ordinary member access and can receive player reminders.",
+    "roles.gm_notifications": "Optional mentionable role notified when GM signup opens.",
+    "roles.administrator": "The role that authorizes configuration and protected administrator diagnostics.",
+    "schedule.timezone": "The IANA time zone used to interpret every weekly schedule time.",
+    "schedule.game.weekday": "The local weekday when the recurring guild game begins.",
+    "schedule.game.time": "The local start time for the recurring guild game.",
+    "schedule.game.duration_minutes": "How long each recurring guild game is scheduled to run.",
+    "schedule.gm_signup.weekday": "The local weekday when GM volunteering opens.",
+    "schedule.gm_signup.time": "The local time when GM volunteering opens.",
+    "schedule.player_signup.weekday": "The local weekday when player interest opens.",
+    "schedule.player_signup.time": "The local time when player interest opens.",
+    "schedule.table_publish.weekday": "The local weekday when planned tables become available.",
+    "schedule.table_publish.time": "The local time when planned tables become available.",
+    "schedule.open_seating.weekday": "The local weekday when remaining seats become first-come.",
+    "schedule.open_seating.time": "The local time when remaining seats become first-come.",
+    "tables.minimum": "The smallest supported player count for a planned table.",
+    "tables.preferred": "The target player count used while planning tables.",
+    "tables.maximum": "The largest supported player count for a planned table.",
+    "automation.mode": "Paused makes no scheduled changes, review waits for an organizer, and autopilot publishes validated work.",
+    "reminders.pre_lock.enabled": "Whether the default player reminder is sent before signup locks."
+  },  "unavailableSettings": [
+    { "id": "deployment.discord_application_id", "reason": "deployer_only" },
+    { "id": "deployment.discord_public_key", "reason": "secret" },
+    { "id": "deployment.discord_bot_token", "reason": "secret" },
+    { "id": "deployment.database_binding", "reason": "deployer_only" },
+    { "id": "internal.raw_discord_ids", "reason": "provider_internal" },
+    { "id": "internal.role_sync_enabled", "reason": "unsupported_and_admin_owned" },
+    { "id": "internal.audit_actor_ids", "reason": "private_history" }
+  ],
+  "diagnostics": {
+    "version": "management-diagnostics.v1",
+    "statusValues": ["healthy", "warning", "blocked", "unavailable"],
+    "checkFields": ["checkId", "section", "level", "summary", "resolution", "fieldIds"],
+    "levelValues": ["pass", "warning", "failure", "unavailable"],
+    "checkIdPattern": "^[a-z][a-z0-9_.-]{2,79}$",
+    "forbiddenCheckFields": ["rawDiscordId", "memberHistory", "actorUserId", "exception", "token", "secret"]
+  },
+  "stableErrors": [
+    "unsupported_contract_version", "unknown_management_method", "invalid_request_envelope",
+    "discord_oauth_required", "guild_not_found", "website_role_not_configured",
+    "membership_verification_unavailable", "not_a_current_guild_member",
+    "administrator_role_required", "rate_limited", "configuration_unavailable",
+    "diagnostics_unavailable", "validation_failed", "revision_conflict",
+    "preview_expired", "idempotency_conflict", "confirmation_required"
+  ],
+  "excludedResponseData": [
+    "discord_access_token", "discord_bot_token", "discord_public_key", "oauth_client_secret",
+    "service_credential", "raw_d1_row", "raw_discord_channel_id", "raw_discord_role_id",
+    "caller_supplied_actor_id", "private_member_history", "private_audit_actor_id",
+    "stack_trace", "environment_variables"
+  ],
+  "fallback": {
+    "operationalAuthority": "Discord commands",
+    "readCommands": ["/guild status", "/guild doctor"],
+    "managementApiCanBeDisabledIndependently": true,
+    "scheduledWorkflowUnaffected": true,
+    "directD1EditsAllowed": false
+  }
+}
