@@ -55,6 +55,7 @@ Technical design and policy references:
 - [Player character journals](player-journals.md)
 - [Historical summary import](historical-session-import.md)
 - [Protected website summary API](website-read-model.md)
+- [Website integration observability](integration-observability.md)
 - [Automatic pre-session table threads](table-threads.md)
 - [Progression seasons and rollover](progression-seasons.md)
 - [Character registry](characters.md)

@@ -103,13 +103,7 @@ export async function authorizeWebsiteRead(input: {
       token,
       input.options?.fetch ?? fetch,
     );
-  } catch (error) {
-    console.error(JSON.stringify({
-      kind: "guild-assistant.website-membership-error",
-      guildId: input.guildId,
-      resource: input.resource,
-      errorKind: error instanceof Error ? error.name : typeof error,
-    }));
+  } catch {
     return { response: apiJson({ error: "membership_verification_unavailable" }, 503) };
   }
   if (!discordMember) {
