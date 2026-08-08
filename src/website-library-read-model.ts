@@ -1,3 +1,4 @@
+import { observeProviderRead } from "./provider-read-telemetry";
 import {
   WEBSITE_LIBRARY_CONTRACTS,
   WebsiteLibraryRepository,
@@ -50,12 +51,12 @@ export async function handleWebsiteLibraryReadRequest(
     url.pathname,
   );
   if (!match) return null;
+  const guildId = match[1]!;
+  const resource = match[2]! as WebsiteLibraryResource;
+  return observeProviderRead(request, resource, async () => {
   if (request.method !== "GET") {
     return apiJson({ error: "method_not_allowed" }, 405, { Allow: "GET" });
   }
-
-  const guildId = match[1]!;
-  const resource = match[2]! as WebsiteLibraryResource;
   const contract = WEBSITE_LIBRARY_CONTRACTS[resource];
   if (request.headers.get("x-guild-contract-version") !== contract) {
     return apiJson({ error: "unsupported_contract_version", supported: [contract] }, 406);
@@ -183,4 +184,5 @@ export async function handleWebsiteLibraryReadRequest(
     if (error instanceof TypeError) return apiJson({ error: error.message }, 400);
     throw error;
   }
+  }, { now: options.now });
 }

@@ -376,11 +376,17 @@ describe("D1 guild shop", () => {
 
     const request = new Request(
       `https://example.test/api/v1/guilds/${encodeURIComponent(f.guildId)}/shop-catalog?limit=1`,
-      { headers: { "cf-connecting-ip": "203.0.113.20" } },
+      { headers: {
+        "cf-connecting-ip": "203.0.113.20",
+        "X-SDG-Correlation-ID": "public-catalog-fixture",
+      } },
     );
     const response = await handleShopPublicApi(request, env, NOW + 4);
     expect(response?.status).toBe(200);
     expect(response?.headers.get("cache-control")).toContain("public");
+    expect(response?.headers.get("X-SDG-Correlation-ID")).toBe("public-catalog-fixture");
+    expect(response?.headers.get("Access-Control-Expose-Headers"))
+      .toContain("X-SDG-Correlation-ID");
     const body = await response!.json() as Record<string, unknown>;
     expect(body.contract).toBe("shop-catalog.v1");
     expect(JSON.stringify(body)).not.toContain(f.userId);

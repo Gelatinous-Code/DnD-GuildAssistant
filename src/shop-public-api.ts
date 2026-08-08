@@ -1,3 +1,4 @@
+import { observeProviderRead } from "./provider-read-telemetry";
 import { ShopService, type ShopEligibility } from "./shop-service";
 
 const CATALOG_PATH = /^\/api\/v1\/guilds\/([^/]+)\/shop-catalog\/?$/;
@@ -74,6 +75,7 @@ export async function handleShopPublicApi(
   const url = new URL(request.url);
   const match = CATALOG_PATH.exec(url.pathname);
   if (!match) return null;
+  return observeProviderRead(request, "shop-catalog", async () => {
   let guildId: string;
   try {
     guildId = decodeURIComponent(match[1]!);
@@ -166,4 +168,5 @@ export async function handleShopPublicApi(
     })),
     page: { limit, nextCursor },
   }, 200, etag);
+  });
 }

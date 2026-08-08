@@ -1,3 +1,4 @@
+import { observeProviderRead } from "./provider-read-telemetry";
 import {
   WEBSITE_SUMMARY_CONTRACT_VERSION,
   WebsiteReadRepository,
@@ -35,6 +36,7 @@ export async function handleWebsiteReadRequest(
   const url = new URL(request.url);
   const match = /^\/api\/v1\/guilds\/(\d{1,20})\/session-summaries$/.exec(url.pathname);
   if (!match) return null;
+  return observeProviderRead(request, "session-summaries", async () => {
   if (request.method !== "GET") {
     return apiJson({ error: "method_not_allowed" }, 405, { Allow: "GET" });
   }
@@ -102,4 +104,5 @@ export async function handleWebsiteReadRequest(
     if (error instanceof TypeError) return apiJson({ error: error.message }, 400);
     throw error;
   }
+  }, { now: options.now });
 }
