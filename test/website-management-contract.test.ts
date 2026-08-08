@@ -50,7 +50,7 @@ describe("website management API contract", () => {
   it("uses an internal named RPC entrypoint and independently authorizes every actor", () => {
     const manifest = contract();
     expect(manifest.contractSetVersion).toBe("website-management.v1");
-    expect(manifest.implementationStatus).toBe("contract_only");
+    expect(manifest.implementationStatus).toBe("read_only");
     expect(manifest.transport).toMatchObject({
       kind: "cloudflare_service_binding_rpc",
       entrypoint: "WebsiteManagementApi",
