@@ -57,6 +57,7 @@ Technical design and policy references:
 - [Protected website summary API](website-read-model.md)
 - [Website integration observability](integration-observability.md)
 - [Website management API boundary](decisions/0003-website-management-boundary.md)
+- [Website management read API](website-management-read-api.md)
 - [Automatic pre-session table threads](table-threads.md)
 - [Progression seasons and rollover](progression-seasons.md)
 - [Character registry](characters.md)

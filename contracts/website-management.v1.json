@@ -3,7 +3,7 @@
   "$id": "https://seconddawnguild.com/contracts/website-management.v1.json",
   "title": "Second Dawn Guild Assistant website management contract",
   "contractSetVersion": "website-management.v1",
-  "implementationStatus": "contract_only",
+  "implementationStatus": "read_only",
   "transport": {
     "kind": "cloudflare_service_binding_rpc",
     "entrypoint": "WebsiteManagementApi",

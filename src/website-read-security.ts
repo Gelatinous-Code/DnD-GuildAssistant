@@ -47,7 +47,11 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
-async function currentMember(guildId: string, token: string, fetcher: typeof fetch) {
+export async function currentDiscordGuildMember(
+  guildId: string,
+  token: string,
+  fetcher: typeof fetch,
+) {
   const response = await fetcher(`${DISCORD_API}/users/@me/guilds/${guildId}/member`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
@@ -70,7 +74,7 @@ async function currentMember(guildId: string, token: string, fetcher: typeof fet
   };
 }
 
-function configuredAccess(config: GuildConfig, roles: readonly string[]) {
+export function configuredWebsiteAccess(config: GuildConfig, roles: readonly string[]) {
   return {
     isPlayer: config.reminderRoleId !== null && roles.includes(config.reminderRoleId),
     isGm: config.gmNotificationRoleId !== null
@@ -96,9 +100,9 @@ export async function authorizeWebsiteRead(input: {
     return { response: apiJson({ error: "website_role_not_configured" }, 503) };
   }
 
-  let discordMember: Awaited<ReturnType<typeof currentMember>>;
+  let discordMember: Awaited<ReturnType<typeof currentDiscordGuildMember>>;
   try {
-    discordMember = await currentMember(
+    discordMember = await currentDiscordGuildMember(
       input.guildId,
       token,
       input.options?.fetch ?? fetch,
@@ -109,7 +113,7 @@ export async function authorizeWebsiteRead(input: {
   if (!discordMember) {
     return { response: apiJson({ error: "not_a_current_guild_member" }, 401) };
   }
-  const access = configuredAccess(config, discordMember.roles);
+  const access = configuredWebsiteAccess(config, discordMember.roles);
   if (discordMember.pending || (!access.isPlayer && !access.isAdmin)) {
     return { response: apiJson({ error: "guild_player_role_required" }, 403) };
   }

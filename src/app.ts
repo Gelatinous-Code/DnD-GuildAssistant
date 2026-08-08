@@ -90,6 +90,7 @@ import {
 } from "./weekly-export";
 import { isGameTier } from "./domain/game-tier";
 import { DISCORD_COMMAND_SCHEMA_VERSION } from "./command-schema-version.js";
+import { automationModeLabel, configurationRevision } from "./guild-configuration";
 
 const WEEKDAY_NAMES = [
   "",
@@ -183,11 +184,6 @@ function weekdayName(weekday: number): string {
   return WEEKDAY_NAMES[weekday] ?? `weekday ${weekday}`;
 }
 
-function automationMode(config: Pick<GuildConfig, "schedulingEnabled" | "autoPublishEnabled">): string {
-  if (!config.schedulingEnabled) return "paused";
-  return config.autoPublishEnabled ? "autopilot" : "review before publish";
-}
-
 export function diagnoseNotificationRoles(
   config: Pick<GuildConfig, "gmNotificationRoleId" | "reminderRoleId" | "adminRoleId">,
   guildRoles: readonly DiscordRole[],
@@ -267,7 +263,7 @@ function setupDashboard(config: GuildConfig | null): string {
     `${config?.adminRoleId ? "✅" : "➖"} **Organizer escalation role (optional):** ${
       config?.adminRoleId ? `<@&${config.adminRoleId}>` : "not configured"
     }`,
-    `${config?.schedulingEnabled ? "✅" : "⏸️"} **Automation mode:** ${config ? automationMode(config) : "paused"}`,
+    `${config?.schedulingEnabled ? "✅" : "⏸️"} **Automation mode:** ${config ? automationModeLabel(config) : "paused"}`,
     "",
     config
       ? "Next: run `/guild status`, then `/guild doctor`. Keep automation Paused until the test-guild pilot passes."
@@ -552,7 +548,7 @@ function setupSummary(config: GuildConfig): string {
       (config.gmNotificationRoleId ? "<@&" + config.gmNotificationRoleId + ">" : "not set"),
     "**Player reminder role:** " +
       (config.reminderRoleId ? "<@&" + config.reminderRoleId + ">" : "not set"),
-    "**Automation:** " + automationMode(config),
+    "**Automation:** " + automationModeLabel(config),
   ].join("\n");
 }
 
@@ -790,7 +786,7 @@ async function handleGuildCommand(
       details: { mode, roleManagement: "admin-owned", reminderEnabled },
     });
     return ephemeral(
-      `${mode === "paused" ? "⏸️" : "✅"} Automation mode is now **${automationMode(saved)}**.\n` +
+      `${mode === "paused" ? "⏸️" : "✅"} Automation mode is now **${automationModeLabel(saved)}**.\n` +
         (reminderEnabled === undefined
           ? "Reminder configuration was unchanged."
           : ` Default reminders are **${reminderEnabled ? "on" : "off"}**.`),
@@ -861,6 +857,7 @@ async function handleGuildCommand(
     const notificationRoleResults = diagnoseNotificationRoles(config, guildRoles);
     const coreProblems = await coreAutomationProblems(discord, guildId, config);
     const coreReady = coreProblems.length === 0 && channelChecks.every((check) => check.ready);
+    const revision = await configurationRevision(config);
     return ephemeral(
       boundedDiscordContent([
         "## Guild Assistant doctor",
@@ -869,7 +866,7 @@ async function handleGuildCommand(
           ? "✅ **Core Discord workflow is ready.**"
           : "❌ **Core workflow needs attention:** " + coreProblems.join(" "),
         config.schedulingEnabled && coreReady
-          ? "✅ **Scheduled lifecycle:** running in " + automationMode(config) + " mode."
+          ? "✅ **Scheduled lifecycle:** running in " + automationModeLabel(config) + " mode."
           : config.schedulingEnabled
             ? "❌ **Scheduled lifecycle:** configured but blocked by the core checks above."
             : "⏸️ **Scheduled lifecycle:** paused until /guild automation is enabled.",
@@ -885,6 +882,8 @@ async function handleGuildCommand(
         "",
         "**Permissions in this command channel**",
         ...permissionResults,
+        "",
+        `**Configuration revision:** \`${revision}\``,
         "",
         coreReady
           ? "Next: choose Review or Autopilot with /guild automation."
