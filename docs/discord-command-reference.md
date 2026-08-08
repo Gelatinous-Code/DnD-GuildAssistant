@@ -69,6 +69,10 @@ These require **Manage Server**.
 
 | Command | Purpose |
 | --- | --- |
+| `/member-data preview` | Privately inventory one verified member's export or departure scope and issue a content revision without changing data. |
+| `/member-data export` | Download the bounded private JSON snapshot matching a preview revision. Requires **Attach Files**. |
+| `/member-data status` | Show secret-safe status for one member export operation. |
+| `/member-data retry` | Retry a failed attachment delivery against its original revision. |
 | `/session status` | Review the private attendance draft and reward state for a table. |
 | `/session attendance` | Record a no-show, substitute, walk-in, or other difference from the published roster. |
 | `/session confirm` | Override or correct the automatic completed result with an audited completed/cancelled revision and reconcile rewards. |

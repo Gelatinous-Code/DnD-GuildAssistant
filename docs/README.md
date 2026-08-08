@@ -61,6 +61,7 @@ Technical design and policy references:
 - [Progression seasons and rollover](progression-seasons.md)
 - [Character registry](characters.md)
 - [Character progression ledger](progression.md)
+- [Member data export and departure lifecycle](member-data-lifecycle.md)
 - [Guild shop and gold purchases](guild-shop.md)
 - [DM priority token policy](dm-priority-token-policy.md)
 - [DM priority operations](dm-priority-operations.md)

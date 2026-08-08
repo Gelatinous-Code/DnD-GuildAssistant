@@ -3,6 +3,7 @@ import { DISCORD_COMMAND_SCHEMA_VERSION } from "../src/command-schema-version.js
 export { DISCORD_COMMAND_SCHEMA_VERSION };
 import { characterCommands } from "./character-commands.mjs";
 import { journalCommands } from "./journal-commands.mjs";
+import { memberDataCommands } from "./member-data-commands.mjs";
 import { progressionCommands } from "./progression-commands.mjs";
 import { recapCommands } from "./recap-commands.mjs";
 import { shopCommands } from "./shop-commands.mjs";
@@ -538,6 +539,7 @@ export const commands = [
   ...m6Commands,
   ...characterCommands,
   ...journalCommands,
+  ...memberDataCommands,
   ...progressionCommands,
   ...recapCommands,
   ...shopCommands,

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seconddawnguild.com/contracts/member-data-operation-status.v1.json",
+  "title": "Member-safe member-data operation status",
+  "schemaVersion": "member-data-operation-status.v1",
+  "transportStatus": "deferred_until_authenticated_M8_service_boundary",
+  "allowedFields": [
+    "operationId",
+    "operationKind",
+    "schemaVersion",
+    "policyVersion",
+    "subjectUserId",
+    "revision",
+    "recordCounts",
+    "status",
+    "failureKind",
+    "startedAt",
+    "updatedAt",
+    "completedAt"
+  ],
+  "statusValues": ["started", "succeeded", "failed"],
+  "forbiddenFields": [
+    "attachmentContent",
+    "sheetUrl",
+    "journalText",
+    "recapText",
+    "auditReason",
+    "requestJson",
+    "exceptionMessage",
+    "rawSql",
+    "databaseBinding",
+    "discordBotToken"
+  ]
+}
