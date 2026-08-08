@@ -9,6 +9,8 @@ import { handleShopPublicApi } from "./shop-public-api";
 import { handleWebsiteReadRequest } from "./website-read-model";
 import { handleWebsiteLibraryReadRequest } from "./website-library-read-model";
 
+export { WebsiteManagementApi } from "./website-management-entrypoint";
+
 const MAX_INTERACTION_BYTES = 1024 * 1024;
 
 function json(body: unknown, status = 200): Response {

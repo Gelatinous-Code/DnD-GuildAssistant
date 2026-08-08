@@ -22,7 +22,6 @@ import {
 } from "./domain/game-tier";
 import {
   cadenceFromConfig,
-  NEW_DAWN_CADENCE,
   cadenceWindowsForStart,
   nextWeeklyOccurrence,
 } from "./schedule";
@@ -39,6 +38,7 @@ import {
   type WeeklyEvent,
 } from "./storage/repository";
 import { UserFacingError } from "./interaction-utils";
+import { configurationRevision, effectiveGuildConfiguration } from "./guild-configuration";
 
 const ALGORITHM_VERSION = "tiered-balanced-rotation-v1";
 const WEEKDAY_NAMES = [
@@ -195,6 +195,8 @@ export class WeekService {
       return "⚠️ Not configured. Run /guild setup.";
     }
     const event = await this.repository.getCurrentWeeklyEvent(guildId);
+    const effective = effectiveGuildConfiguration(config);
+    const revision = await configurationRevision(config);
     const lines = [
       "## Guild Assistant status",
       "**Player signup and tables:** " + (config.eventChannelId ? "<#" + config.eventChannelId + ">" : "missing"),
@@ -205,17 +207,17 @@ export class WeekService {
         (config.reminderRoleId ? "<@&" + config.reminderRoleId + ">" : "not configured"),
       "**Time zone:** " + config.timezone,
       "**GM signup:** " +
-        (WEEKDAY_NAMES[config.gmSignupDay ?? NEW_DAWN_CADENCE.gmSignup.weekday]) +
-        " at " + (config.gmSignupTime ?? NEW_DAWN_CADENCE.gmSignup.time),
+        (WEEKDAY_NAMES[effective.schedule.gmSignup.weekday]) +
+        " at " + effective.schedule.gmSignup.time,
       "**Player interest:** " +
-        (WEEKDAY_NAMES[config.playerSignupDay ?? NEW_DAWN_CADENCE.playerSignup.weekday]) +
-        " at " + (config.playerSignupTime ?? NEW_DAWN_CADENCE.playerSignup.time),
+        (WEEKDAY_NAMES[effective.schedule.playerSignup.weekday]) +
+        " at " + effective.schedule.playerSignup.time,
       "**Tables publish:** " +
-        (WEEKDAY_NAMES[config.tablePublishDay ?? NEW_DAWN_CADENCE.tablePublish.weekday]) +
-        " at " + (config.tablePublishTime ?? NEW_DAWN_CADENCE.tablePublish.time),
+        (WEEKDAY_NAMES[effective.schedule.tablePublish.weekday]) +
+        " at " + effective.schedule.tablePublish.time,
       "**Open seating:** " +
-        (WEEKDAY_NAMES[config.openSeatingDay ?? NEW_DAWN_CADENCE.openSeating.weekday]) +
-        " at " + (config.openSeatingTime ?? NEW_DAWN_CADENCE.openSeating.time),
+        (WEEKDAY_NAMES[effective.schedule.openSeating.weekday]) +
+        " at " + effective.schedule.openSeating.time,
       "**Games:** " +
         (WEEKDAY_NAMES[config.weeklyDay] ?? "weekday " + config.weeklyDay) +
         " at " + config.weeklyTime + " for " + config.eventDurationMinutes + " minutes",
@@ -230,6 +232,7 @@ export class WeekService {
         (config.schedulingEnabled ? "on" : "off") +
         ", auto-publish " +
         (config.autoPublishEnabled ? "on" : "off"),
+      "**Configuration revision:** `" + revision + "`",
     ];
     if (!event) {
       lines.push("**Current week:** none");
